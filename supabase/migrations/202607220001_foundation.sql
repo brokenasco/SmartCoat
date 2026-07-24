@@ -21,6 +21,39 @@ create table public.company_memberships (
 );
 create index memberships_user_active_idx on public.company_memberships(user_id,company_id) where status='active';
 
+create function private.provision_new_user() returns trigger
+language plpgsql security definer set search_path=''
+as $$
+declare
+  new_company_id uuid;
+  company_name text;
+begin
+  insert into public.profiles(id, full_name)
+  values (new.id, nullif(trim(coalesce(new.raw_user_meta_data ->> 'full_name', '')), ''))
+  on conflict (id) do nothing;
+
+  if exists (select 1 from public.company_memberships where user_id = new.id) then
+    return new;
+  end if;
+
+  company_name := coalesce(
+    nullif(trim(new.raw_user_meta_data ->> 'company_name'), ''),
+    initcap(split_part(coalesce(new.email, 'SmartCoat Company'), '@', 1)) || ' Painting'
+  );
+
+  insert into public.companies(name, slug, onboarding_completed_at)
+  values (company_name, 'company-' || replace(new.id::text, '-', ''), now())
+  returning id into new_company_id;
+
+  insert into public.company_memberships(company_id, user_id, role, status)
+  values (new_company_id, new.id, 'manager', 'active');
+
+  insert into public.audit_logs(company_id, actor_id, action, entity_type, entity_id)
+  values (new_company_id, new.id, 'company.provisioned', 'company', new_company_id::text);
+  return new;
+end
+$$;
+
 create table public.customers (
   id uuid primary key default gen_random_uuid(), company_id uuid not null references public.companies(id) on delete restrict, type text not null default 'individual' check(type in('individual','company')),
   name text not null, email text, phone text, status text not null default 'lead', notes text, created_at timestamptz not null default now(), updated_at timestamptz not null default now(), archived_at timestamptz
@@ -70,10 +103,10 @@ create table public.audit_logs (
 );
 create index audit_logs_company_time_idx on public.audit_logs(company_id,occurred_at desc);
 
-create function private.is_company_member(target_company uuid) returns boolean language sql stable security invoker set search_path='' as $$
+create function private.is_company_member(target_company uuid) returns boolean language sql stable security definer set search_path='' as $$
   select exists(select 1 from public.company_memberships m where m.company_id=target_company and m.user_id=(select auth.uid()) and m.status='active')
 $$;
-create function private.has_company_role(target_company uuid, allowed public.company_role[]) returns boolean language sql stable security invoker set search_path='' as $$
+create function private.has_company_role(target_company uuid, allowed public.company_role[]) returns boolean language sql stable security definer set search_path='' as $$
   select exists(select 1 from public.company_memberships m where m.company_id=target_company and m.user_id=(select auth.uid()) and m.status='active' and m.role=any(allowed))
 $$;
 revoke all on all functions in schema private from public, anon;
@@ -108,6 +141,42 @@ grant select on public.companies, public.company_memberships, public.profiles, p
 grant insert,update,delete on public.customers, public.properties, public.estimates, public.estimate_rooms, public.projects, public.employees, public.invoices to authenticated;
 grant update on public.profiles to authenticated;
 grant usage,select on all sequences in schema public to authenticated;
+
+revoke all on function private.provision_new_user() from public, anon, authenticated;
+create trigger provision_user_after_signup after insert on auth.users
+for each row execute function private.provision_new_user();
+
+-- Bring pre-migration signups into the same production onboarding path.
+do $$
+declare
+  existing_user record;
+  new_company_id uuid;
+  company_name text;
+begin
+  for existing_user in
+    select u.id, u.email, u.raw_user_meta_data
+    from auth.users u
+    where not exists (
+      select 1 from public.company_memberships m where m.user_id = u.id
+    )
+  loop
+    insert into public.profiles(id, full_name)
+    values (existing_user.id, nullif(trim(coalesce(existing_user.raw_user_meta_data ->> 'full_name', '')), ''))
+    on conflict (id) do nothing;
+    company_name := coalesce(
+      nullif(trim(existing_user.raw_user_meta_data ->> 'company_name'), ''),
+      initcap(split_part(coalesce(existing_user.email, 'SmartCoat Company'), '@', 1)) || ' Painting'
+    );
+    insert into public.companies(name, slug, onboarding_completed_at)
+    values (company_name, 'company-' || replace(existing_user.id::text, '-', ''), now())
+    returning id into new_company_id;
+    insert into public.company_memberships(company_id, user_id, role, status)
+    values (new_company_id, existing_user.id, 'manager', 'active');
+    insert into public.audit_logs(company_id, actor_id, action, entity_type, entity_id)
+    values (new_company_id, existing_user.id, 'company.provisioned', 'company', new_company_id::text);
+  end loop;
+end
+$$;
 
 create function private.set_updated_at() returns trigger language plpgsql security invoker set search_path='' as $$ begin new.updated_at=now(); return new; end $$;
 create trigger companies_updated before update on public.companies for each row execute function private.set_updated_at();
