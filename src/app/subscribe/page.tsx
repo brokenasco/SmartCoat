@@ -1,0 +1,6 @@
+import Link from "next/link";
+
+export default function SubscribePage(){
+  const checkoutUrl=process.env.NEXT_PUBLIC_PREMIUM_CHECKOUT_URL;
+  return <main className="grid min-h-screen place-items-center px-6"><section className="max-w-xl rounded-2xl border border-border bg-surface p-8 shadow-xl"><p className="text-sm font-bold uppercase tracking-widest text-brand">SmartCoat Premium</p><h1 className="mt-3 text-4xl font-semibold tracking-tight">Unlock the complete estimating workflow.</h1><p className="mt-4 leading-7 text-muted">Create and save real estimates, manage customers and projects, plan crews, and protect margin with one consistent calculation engine.</p>{checkoutUrl?<a href={checkoutUrl} className="mt-7 inline-flex min-h-12 items-center rounded-lg bg-brand px-5 font-semibold text-white">Continue to secure checkout</a>:<p role="status" className="mt-7 rounded-lg bg-amber-50 p-4 text-sm text-amber-950">Checkout is not configured yet. No payment will be collected. Add the approved provider checkout URL and verified webhook before accepting subscriptions.</p>}<div><Link href="/tour" className="mt-5 inline-block font-semibold text-brand">Try the estimating tour instead</Link></div></section></main>
+}

@@ -1,0 +1,10 @@
+import { describe, expect, it } from "vitest";
+import { calculateEstimate, type EstimateEngineInput } from "./estimate-engine";
+const base: EstimateEngineInput={room:{lengthFeet:15,widthFeet:12,heightFeet:8},openings:[{kind:"window",widthFeet:3,heightFeet:4},{kind:"window",widthFeet:4,heightFeet:5}],coats:2,coverageSqFtPerGallon:400,wastePercent:10,paintPricePerGallonCents:4798,productionRateSqFtPerHour:150,prepHours:2,crewSize:2,averageWageCentsPerHour:2500,laborBurdenPercent:20,overheadPercent:10,targetGrossMarginPercent:45,productiveHoursPerDay:8,retailer:"home_depot",zipCode:"33601",pricingSource:"estimated_config",pricingTimestamp:"2026-07-23T00:00:00.000Z"};
+describe("central estimate engine",()=>{
+ it("calculates surfaces, openings, gallons, labor, duration, and true gross margin",()=>{const r=calculateEstimate(base);expect(r.grossSurfaceAreaSqFt).toBe(432);expect(r.deductedOpeningAreaSqFt).toBe(32);expect(r.netPaintableAreaSqFt).toBe(400);expect(r.rawGallonsRequired).toBe(2.2);expect(r.recommendedGallons).toBe(2.25);expect(r.crewSize).toBe(2);expect(r.expectedGrossMarginPercent).toBe(45);});
+ it("adds labor burden without changing labor hours",()=>{const r=calculateEstimate(base);expect(r.laborBurdenCents).toBe(Math.round(r.wageCostCents*.2));expect(r.estimatedElapsedHours).toBeCloseTo(r.laborHours/2,2);});
+ it("handles zero margin",()=>expect(calculateEstimate({...base,targetGrossMarginPercent:0}).expectedGrossMarginPercent).toBe(0));
+ it("rejects zero workers, missing coverage, invalid ZIP, and impossible margin",()=>{expect(()=>calculateEstimate({...base,crewSize:0})).toThrow();expect(()=>calculateEstimate({...base,coverageSqFtPerGallon:0})).toThrow();expect(()=>calculateEstimate({...base,zipCode:"abc"})).toThrow();expect(()=>calculateEstimate({...base,targetGrossMarginPercent:100})).toThrow();});
+ it("caps excessive openings and returns a warning",()=>{const r=calculateEstimate({...base,openings:[{kind:"other",widthFeet:100,heightFeet:100}]});expect(r.netPaintableAreaSqFt).toBe(0);expect(r.warnings[0]).toMatch(/exceeds/);});
+});
