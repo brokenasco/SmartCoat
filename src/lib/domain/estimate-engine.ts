@@ -1,6 +1,6 @@
 import Decimal from "decimal.js";
 
-export const ESTIMATE_FORMULA_VERSION = "3.0.0";
+export const ESTIMATE_FORMULA_VERSION = "4.0.0";
 export type Retailer = "home_depot" | "lowes" | "manual_supplier";
 export type Opening = { widthFeet: number; heightFeet: number; quantity?: number; kind: "window" | "door" | "other" };
 export type EstimateEngineInput = {

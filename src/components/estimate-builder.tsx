@@ -1,186 +1,206 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { NumericInput } from "@/components/numeric-input";
 import { PaintSelector } from "@/components/paint-selector";
-import { tryCalculateEstimate } from "@/lib/domain/estimate-engine";
+import { calculateMultiRoomEstimate, type RoomEstimateInput } from "@/lib/domain/multi-room-estimate";
+import { ESTIMATION_ASSUMPTIONS } from "@/lib/domain/estimation-config";
 import type { EstimatePaintSelection } from "@/lib/domain/paint-catalog";
 import { parseNumericInput } from "@/lib/domain/numeric-input";
 import { formatMoney } from "@/lib/domain/pricing";
-import { unavailableRetailerPrice } from "@/lib/domain/retailer-pricing";
 import { createClient } from "@/lib/supabase/browser";
 
-type NumericField =
-  | "length" | "width" | "height" | "window1Width" | "window1Height"
-  | "window2Width" | "window2Height" | "coats" | "coverage" | "waste"
-  | "workers" | "wageDollars" | "burden" | "productionRate" | "prepHours"
-  | "overhead" | "margin" | "containerSizeGallons" | "containerQuantity"
-  | "pricePerContainerDollars";
+type OpeningDraft = { id: string; name: string; kind: "window" | "door" | "other"; width: string; height: string; quantity: string };
+type RoomDraft = {
+  id: string; name: string; length: string; width: string; height: string;
+  workers: string; wageDollars: string; prepHours: string; coats: string;
+  coverage: string; waste: string; containerSizeGallons: string;
+  containerQuantity: string; pricePerContainerDollars: string;
+  openings: OpeningDraft[]; paint: EstimatePaintSelection;
+};
+type DraftPayload = { rooms: RoomDraft[] };
 
-type Draft = Record<NumericField, string> & {
-  name: string;
-  coverageReason: string;
-  projectPostalCode: string;
+const emptyPaint = (): EstimatePaintSelection => ({
+  paintColorId: null, brandName: null, colorName: null, colorCode: null,
+  productName: null, productType: null, projectUse: "interior", sheen: null,
+  coverageRate: 400, coverageSource: "company_default", coverageWasOverridden: false,
+  coverageOverrideReason: null, containerSizeGallons: 1, containerQuantity: 1,
+  pricePerContainerCents: 0, retailerName: null, notes: null, isManualEntry: true,
+});
+const roomDraft = (position: number, inherit?: RoomDraft): RoomDraft => ({
+  id: crypto.randomUUID(), name: `Room ${position}`, length: "", width: "", height: "",
+  workers: inherit?.workers ?? "2", wageDollars: inherit?.wageDollars ?? "25.00",
+  prepHours: inherit?.prepHours ?? "2", coats: "2", coverage: "400", waste: "10",
+  containerSizeGallons: "1", containerQuantity: "1", pricePerContainerDollars: "",
+  openings: [], paint: emptyPaint(),
+});
+const numberValue = (raw: string) => {
+  const parsed = parseNumericInput(raw);
+  return parsed.state === "valid" ? parsed.value : null;
 };
 
-const initialDraft: Draft = {
-  name: "", length: "15", width: "12", height: "8",
-  window1Width: "3", window1Height: "4", window2Width: "4", window2Height: "5",
-  coats: "2", coverage: "400", coverageReason: "", waste: "10", workers: "2",
-  wageDollars: "25.00", burden: "20", productionRate: "150", prepHours: "2",
-  overhead: "10", margin: "45", containerSizeGallons: "1",
-  containerQuantity: "3", pricePerContainerDollars: "0.00", projectPostalCode: "",
-};
-
-function parsed(raw: string) {
-  const result = parseNumericInput(raw);
-  return result.state === "valid" ? result.value : null;
-}
-
-export function EstimateBuilder({ companyId, brands }: {
+export function EstimateBuilder({ companyId, brands, estimateId: startingId = null, initialTitle = "", initialPayload }: {
   companyId: string;
   brands: { id: string; name: string }[];
+  estimateId?: string | null;
+  initialTitle?: string;
+  initialPayload?: DraftPayload | null;
 }) {
-  const [draft, setDraft] = useState(initialDraft);
-  const [paint, setPaint] = useState<EstimatePaintSelection>({
-    paintColorId: null, brandName: null, colorName: null, colorCode: null,
-    productName: null, productType: null, projectUse: "interior", sheen: null,
-    coverageRate: 400, coverageSource: "company_default",
-    coverageWasOverridden: false, coverageOverrideReason: null,
-    containerSizeGallons: 1, containerQuantity: 3, pricePerContainerCents: 0,
-    retailerName: null, notes: null, isManualEntry: true,
-  });
+  const router = useRouter();
+  const [estimateId, setEstimateId] = useState(startingId);
+  const [title, setTitle] = useState(initialTitle);
+  const [rooms, setRooms] = useState<RoomDraft[]>(initialPayload?.rooms?.length ? initialPayload.rooms : [roomDraft(1)]);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [margin, setMargin] = useState("45");
   const [status, setStatus] = useState("");
+  const [saving, setSaving] = useState(false);
+  const active = rooms[activeIndex];
 
-  const input = useMemo(() => {
-    const values = {
-      length: parsed(draft.length), width: parsed(draft.width), height: parsed(draft.height),
-      window1Width: parsed(draft.window1Width), window1Height: parsed(draft.window1Height),
-      window2Width: parsed(draft.window2Width), window2Height: parsed(draft.window2Height),
-      coats: parsed(draft.coats), coverage: parsed(draft.coverage), waste: parsed(draft.waste),
-      workers: parsed(draft.workers), wageDollars: parsed(draft.wageDollars),
-      burden: parsed(draft.burden), productionRate: parsed(draft.productionRate),
-      prepHours: parsed(draft.prepHours), overhead: parsed(draft.overhead),
-      margin: parsed(draft.margin), containerSizeGallons: parsed(draft.containerSizeGallons),
-      containerQuantity: parsed(draft.containerQuantity),
-      pricePerContainerDollars: parsed(draft.pricePerContainerDollars),
-    };
-    if (Object.values(values).some(value => value === null)) return null;
-    return {
-      room: { lengthFeet: values.length!, widthFeet: values.width!, heightFeet: values.height! },
-      openings: [
-        { kind: "window" as const, widthFeet: values.window1Width!, heightFeet: values.window1Height! },
-        { kind: "window" as const, widthFeet: values.window2Width!, heightFeet: values.window2Height! },
-      ],
-      coats: values.coats!, coverageSqFtPerGallon: values.coverage!, wastePercent: values.waste!,
-      containerSizeGallons: values.containerSizeGallons!,
-      containerQuantity: values.containerQuantity!,
-      pricePerContainerCents: Math.round(values.pricePerContainerDollars! * 100),
-      productionRateSqFtPerHour: values.productionRate!, prepHours: values.prepHours!,
-      crewSize: values.workers!, averageWageCentsPerHour: Math.round(values.wageDollars! * 100),
-      laborBurdenPercent: values.burden!, overheadPercent: values.overhead!,
-      targetGrossMarginPercent: values.margin!, productiveHoursPerDay: 8,
-      retailer: "manual_supplier" as const,
-      projectPostalCode: draft.projectPostalCode || undefined,
-      pricingSource: "manual" as const,
-      pricingTimestamp: new Date().toISOString(),
-    };
-  }, [draft]);
-  const calculation = useMemo(
-    () => input ? tryCalculateEstimate(input) : { ok: false as const, value: null, errors: [{ field: "estimate", message: "Complete the numeric inputs to calculate." }] },
-    [input],
-  );
-  const result = calculation.value;
+  const calculation = useMemo(() => {
+    try {
+      const targetMargin = numberValue(margin);
+      if (targetMargin === null) throw new Error("Enter a valid target gross margin.");
+      const inputs: RoomEstimateInput[] = rooms.map(room => {
+        const values = {
+          lengthFeet: numberValue(room.length), widthFeet: numberValue(room.width), heightFeet: numberValue(room.height),
+          crewSize: numberValue(room.workers), wage: numberValue(room.wageDollars), prep: numberValue(room.prepHours),
+          coats: numberValue(room.coats), coverage: numberValue(room.coverage), waste: numberValue(room.waste),
+          container: numberValue(room.containerSizeGallons), quantity: numberValue(room.containerQuantity), price: numberValue(room.pricePerContainerDollars),
+        };
+        if (Object.values(values).some(value => value === null)) throw new Error(`${room.name}: complete required measurements, labor, and paint pricing.`);
+        if (!room.paint.productName?.trim()) throw new Error(`${room.name}: choose a product line or enter one manually.`);
+        if (values.price! <= 0) throw new Error(`${room.name}: enter a verified price per container.`);
+        return {
+          id: room.id, name: room.name, lengthFeet: values.lengthFeet!, widthFeet: values.widthFeet!,
+          heightFeet: values.heightFeet!, openings: room.openings.map(opening => ({
+            kind: opening.kind, widthFeet: numberValue(opening.width) ?? 0,
+            heightFeet: numberValue(opening.height) ?? 0, quantity: numberValue(opening.quantity) ?? 1,
+          })), coats: values.coats!, coverageSqFtPerGallon: values.coverage!, wastePercent: values.waste!,
+          containerSizeGallons: values.container!, containerQuantity: values.quantity!,
+          pricePerContainerCents: Math.round(values.price! * 100), crewSize: values.crewSize!,
+          averageWageCentsPerHour: Math.round(values.wage! * 100), prepPersonHours: values.prep!,
+          retailer: "manual_supplier" as const, pricingSource: "manual" as const, pricingTimestamp: new Date().toISOString(),
+        };
+      });
+      return { valid: true as const, result: calculateMultiRoomEstimate(inputs, targetMargin), error: "" };
+    } catch (error) {
+      return { valid: false as const, result: null, error: error instanceof Error ? error.message : "Estimate is incomplete." };
+    }
+  }, [rooms, margin]);
 
-  function setNumeric(name: NumericField, raw: string) {
-    setDraft(current => ({ ...current, [name]: raw }));
+  function updateRoom(patch: Partial<RoomDraft>) {
+    setRooms(current => current.map((room, index) => index === activeIndex ? { ...room, ...patch } : room));
+  }
+  function updateOpening(id: string, patch: Partial<OpeningDraft>) {
+    updateRoom({ openings: active.openings.map(opening => opening.id === id ? { ...opening, ...patch } : opening) });
+  }
+  function addOpening() {
+    updateRoom({ openings: [...active.openings, { id: crypto.randomUUID(), name: `Window ${active.openings.length + 1}`, kind: "window", width: "", height: "", quantity: "1" }] });
+  }
+  function addRoom() {
+    const next = roomDraft(rooms.length + 1, active);
+    setRooms(current => [...current, next]);
+    setActiveIndex(rooms.length);
+  }
+  function removeRoom(index: number) {
+    if (rooms.length === 1) return setStatus("An estimate must keep at least one room.");
+    setRooms(current => current.filter((_, roomIndex) => roomIndex !== index));
+    setActiveIndex(current => Math.max(0, Math.min(current, rooms.length - 2)));
   }
 
-  async function save() {
-    if (!draft.name.trim()) return setStatus("Give this estimate a name first.");
-    if (!result || !input) return setStatus(calculation.errors[0]?.message ?? "Complete all required estimate inputs.");
-    if (draft.projectPostalCode && !/^\d{5}$/.test(draft.projectPostalCode)) return setStatus("Project ZIP code must contain five digits.");
-    if (input.coverageSqFtPerGallon !== 400 && !draft.coverageReason.trim()) return setStatus("Explain why the default paint coverage was overridden.");
-    setStatus("Saving…");
-    const paintSnapshot = {
-      ...paint,
-      coverageRate: input.coverageSqFtPerGallon,
-      coverageSource: input.coverageSqFtPerGallon === 400 ? "company_default" as const : "manual_override" as const,
-      coverageWasOverridden: input.coverageSqFtPerGallon !== 400,
-      coverageOverrideReason: input.coverageSqFtPerGallon === 400 ? null : draft.coverageReason.trim(),
-      containerSizeGallons: input.containerSizeGallons,
-      containerQuantity: result.purchaseQuantity,
-      pricePerContainerCents: input.pricePerContainerCents,
+  async function saveDraft() {
+    if (saving) return;
+    setSaving(true); setStatus("Saving draft…");
+    const payload = {
+      rooms: rooms.map((room, sortOrder) => ({
+        ...room, sortOrder, result: calculation.result?.rooms.find(result => result.roomId === room.id) ?? null,
+        openings: room.openings.map((opening, openingIndex) => ({ ...opening, sortOrder: openingIndex })),
+      })),
     };
+    const totals = calculation.result?.totals;
     const supabase = createClient();
-    const { data, error } = await supabase.from("estimates").insert({
-      company_id: companyId, title: draft.name.trim(), status: "draft",
-      subtotal_cents: result.customerSubtotalCents, tax_cents: result.taxCents,
-      total_cents: result.customerEstimateCents, cost_cents: result.totalContractorCostCents,
-      target_margin_percent: input.targetGrossMarginPercent,
-      calculation_snapshot: { formulaVersion: result.formulaVersion, inputs: input, paint: paintSnapshot, result },
-    }).select("id").single();
-    if (error) return setStatus(error.message);
-    const { error: paintError } = await supabase.from("estimate_paint_items").insert({
-      company_id: companyId, estimate_id: data.id, paint_color_id: paintSnapshot.paintColorId,
-      brand_name_snapshot: paintSnapshot.brandName, color_name_snapshot: paintSnapshot.colorName,
-      color_code_snapshot: paintSnapshot.colorCode, product_name_snapshot: paintSnapshot.productName,
-      product_type_snapshot: paintSnapshot.productType, project_use_snapshot: paintSnapshot.projectUse,
-      sheen_snapshot: paintSnapshot.sheen, coverage_rate_snapshot: input.coverageSqFtPerGallon,
-      coverage_source: paintSnapshot.coverageSource,
-      coverage_was_overridden: paintSnapshot.coverageWasOverridden,
-      coverage_override_reason: paintSnapshot.coverageOverrideReason,
-      number_of_coats: input.coats, waste_percentage: input.wastePercent,
-      calculated_gallons: result.rawGallonsRequired, purchase_quantity: result.gallonsPurchased,
-      is_manual_entry: paintSnapshot.isManualEntry,
-      container_volume_snapshot: input.containerSizeGallons,
-      container_volume_unit_snapshot: "gallon",
-      container_gallons_snapshot: input.containerSizeGallons,
-      container_quantity_snapshot: result.purchaseQuantity,
-      price_per_container_cents_snapshot: input.pricePerContainerCents,
-      gallons_purchased_snapshot: result.gallonsPurchased,
-      excess_gallons_snapshot: result.excessGallons,
-      unit_price_snapshot: input.pricePerContainerCents,
-      price_source_snapshot: "manual supplier price",
-      price_collected_at: input.pricingTimestamp,
-      price_availability_snapshot: "manual",
-      retailer_snapshot: paintSnapshot.retailerName,
-      postal_code_snapshot: draft.projectPostalCode || null,
-      notes_snapshot: paintSnapshot.notes,
+    const { data, error } = await supabase.rpc("save_estimate_draft", {
+      target_estimate: estimateId, target_company: companyId, draft_title: title,
+      payload, calculation: { valid: calculation.valid, error: calculation.error, ...calculation.result },
+      total_amount: totals?.customerEstimateCents ?? 0, cost_amount: totals?.contractorCostCents ?? 0,
+      margin_percent: numberValue(margin) ?? 45,
     });
-    setStatus(paintError ? `Draft saved, but paint snapshot failed: ${paintError.message}` : `Draft ${data.id.slice(0, 8)} saved.`);
+    setSaving(false);
+    if (error) {
+      console.error("estimate_draft_save_failed", { code: error.code });
+      return setStatus(error.message);
+    }
+    setEstimateId(data);
+    setStatus("Draft saved.");
+    router.replace(`/dashboard/estimates/${data}/edit`);
+    router.refresh();
+    return data as string;
   }
 
-  const numberField = (
-    label: string, name: NumericField,
-    options: { min?: number; max?: number; integer?: boolean; prefix?: string; suffix?: string } = {},
-  ) => <NumericInput label={label} value={draft[name]} onChange={raw => setNumeric(name, raw)} {...options}/>;
-  const homeDepot = unavailableRetailerPrice("home_depot", false);
-  const lowes = unavailableRetailerPrice("lowes", false);
+  async function approve() {
+    if (!calculation.valid) return setStatus(calculation.error);
+    const id = estimateId ?? await saveDraft();
+    if (!id) return;
+    const confirmed = window.confirm("Approving this estimate will lock dimensions, paint selections, labor assumptions, material costs, and customer price. Future scope changes require a revision or change order.");
+    if (!confirmed) return;
+    const { error } = await createClient().rpc("approve_estimate", { target_estimate: id });
+    if (error) {
+      console.error("estimate_approval_failed", { code: error.code });
+      return setStatus(error.message);
+    }
+    router.replace(`/dashboard/estimates/${id}`);
+    router.refresh();
+  }
 
-  return <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
-    <section className="space-y-6 rounded-xl border border-border bg-surface p-6">
-      <div><h2 className="font-semibold">Estimate details</h2><p className="text-sm text-muted">Formula {result?.formulaVersion ?? "3.0.0"} calculates only after every required numeric field is valid.</p></div>
-      <label className="block text-sm font-medium">Estimate name<input value={draft.name} onChange={event => setDraft(current => ({ ...current, name: event.target.value }))} className="mt-1 min-h-11 w-full rounded-lg border border-border px-3"/></label>
-      <PaintSelector brands={brands} value={paint} onChange={setPaint}/>
-      <div className="grid gap-4 sm:grid-cols-3">{numberField("Length", "length", { min: 0.01, suffix: "ft" })}{numberField("Width", "width", { min: 0.01, suffix: "ft" })}{numberField("Wall height", "height", { min: 0.01, suffix: "ft" })}{numberField("Number of coats", "coats", { min: 1, max: 10, integer: true })}{numberField("Coverage", "coverage", { min: 1, suffix: "ft²/gal" })}{numberField("Waste", "waste", { min: 0, max: 100, suffix: "%" })}</div>
-      {parsed(draft.coverage) !== 400 && <label className="block text-sm font-medium">Coverage override reason<input value={draft.coverageReason} onChange={event => setDraft(current => ({ ...current, coverageReason: event.target.value }))} className="mt-1 min-h-11 w-full rounded-lg border border-border px-3" placeholder="Required for audit history"/></label>}
-      <div className="grid gap-4 sm:grid-cols-4">{numberField("Window 1 width", "window1Width", { min: 0, suffix: "ft" })}{numberField("Window 1 height", "window1Height", { min: 0, suffix: "ft" })}{numberField("Window 2 width", "window2Width", { min: 0, suffix: "ft" })}{numberField("Window 2 height", "window2Height", { min: 0, suffix: "ft" })}</div>
-      <div className="grid gap-4 sm:grid-cols-3">{numberField("Gallons per Container", "containerSizeGallons", { min: 0.01, suffix: "gal" })}{numberField("Container Quantity", "containerQuantity", { min: 1, integer: true })}{numberField("Price per Container", "pricePerContainerDollars", { min: 0, prefix: "$" })}</div>
-      {result && <div className="rounded-lg bg-background p-4"><dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4"><Metric l="Net walls" v={`${result.netPaintableAreaSqFt} ft²`}/><Metric l="Raw paint required" v={`${result.rawGallonsRequired} gal`}/><Metric l="Containers required" v={`${result.containersRequired}`}/><Metric l="Containers purchased" v={`${result.purchaseQuantity}`}/><Metric l="Gallons purchased" v={`${result.gallonsPurchased} gal`}/><Metric l="Excess paint" v={`${result.excessGallons} gal`}/><Metric l="Unit price" v={formatMoney(result.pricePerContainerCents)}/><Metric l="Paint cost" v={formatMoney(result.paintCostCents)}/></dl></div>}
-      {!result && <p role="status" className="rounded-lg bg-amber-50 p-4 text-sm text-amber-900">Complete all numeric fields to resume calculation. Blank and partial values are safe while editing.</p>}
-      <div className="grid gap-4 sm:grid-cols-3">{numberField("Workers", "workers", { min: 1, integer: true })}{numberField("Average Hourly Wage per Worker", "wageDollars", { min: 0.01, prefix: "$", suffix: "/hr" })}{numberField("Labor burden", "burden", { min: 0, max: 100, suffix: "%" })}{numberField("Production rate", "productionRate", { min: 0.01, suffix: "ft²/hr" })}{numberField("Prep hours", "prepHours", { min: 0, suffix: "person-hr" })}{numberField("Overhead", "overhead", { min: 0, max: 100, suffix: "%" })}</div>
-      <section className="rounded-lg border border-border p-4"><h3 className="font-semibold">Retailer pricing</h3><p className="mt-1 text-sm text-muted">Prices require an exact product variant, sheen, base, container, and authorized retailer listing. ZIP code is not used.</p><div className="mt-3 grid gap-3 sm:grid-cols-2"><RetailerState name="Home Depot" message={homeDepot.status === "available" ? "Authorized exact-product price available." : homeDepot.message}/><RetailerState name="Lowe's" message={lowes.status === "available" ? "Authorized exact-product price available." : lowes.message}/></div></section>
-      <label className="block max-w-sm text-sm font-medium">Project ZIP code <span className="font-normal text-muted">(location only)</span><input value={draft.projectPostalCode} inputMode="numeric" maxLength={5} onChange={event => setDraft(current => ({ ...current, projectPostalCode: event.target.value.replace(/\D/g, "").slice(0, 5) }))} className="mt-1 min-h-11 w-full rounded-lg border border-border px-3"/><span className="mt-1 block text-xs font-normal text-muted">Does not affect paint price, retailer, taxes, or estimate total.</span></label>
+  const numeric = (label: string, key: keyof RoomDraft, suffix?: string, prefix?: string) =>
+    <NumericInput label={label} value={String(active[key])} onChange={value => updateRoom({ [key]: value })} suffix={suffix} prefix={prefix}/>;
+
+  return <div className="space-y-6">
+    <section className="rounded-xl border border-border bg-surface p-5">
+      <label className="block text-sm font-medium">Estimate name<input value={title} onChange={event => setTitle(event.target.value)} placeholder="Untitled draft" className="mt-1 min-h-11 w-full rounded-lg border border-border px-3"/></label>
+      <nav aria-label="Estimate rooms" className="mt-5 flex flex-wrap gap-2">{rooms.map((room,index) =>
+        <button key={room.id} onClick={() => setActiveIndex(index)} aria-current={index===activeIndex ? "page" : undefined} className={`min-h-11 rounded-lg border px-4 text-sm font-semibold ${index===activeIndex ? "border-brand bg-brand text-white" : "border-border"}`}>{room.name}</button>)}</nav>
     </section>
-    <aside className="h-fit rounded-xl bg-[#16251d] p-6 text-white">
-      <NumericInput label="Target gross margin" value={draft.margin} min={0} max={99.99} suffix="%" onChange={raw => setNumeric("margin", raw)} className="text-white"/>
-      {result ? <><dl className="mt-7 space-y-3 border-y border-white/10 py-5 text-sm"><Row l="Paint containers" v={formatMoney(result.paintCostCents)}/><Row l="Wages" v={formatMoney(result.wageCostCents)}/><Row l="Labor burden" v={formatMoney(result.laborBurdenCents)}/><Row l="Overhead" v={formatMoney(result.overheadCents)}/><Row l="Contractor cost" v={formatMoney(result.totalContractorCostCents)}/><Row l="Expected gross profit" v={formatMoney(result.expectedGrossProfitCents)}/></dl><p className="mt-5 text-xs text-emerald-100/60">Recommended customer price</p><p className="font-mono text-3xl">{formatMoney(result.customerEstimateCents)}</p><p className="mt-2 text-xs text-emerald-100/70">{result.laborHours} total person-hours · {result.estimatedElapsedHours} elapsed crew hours · {result.estimatedWorkingDays} working days</p><p className="mt-4 text-xs text-amber-200">{result.warnings.join(" ")}</p></> : <p className="mt-6 rounded-lg bg-white/10 p-4 text-sm">Calculation paused while an input is incomplete.</p>}
-      <button onClick={save} disabled={!result} className="mt-6 min-h-12 w-full rounded-lg bg-emerald-400 font-semibold text-emerald-950 disabled:cursor-not-allowed disabled:opacity-50">Save draft</button>{status && <p role="status" className="mt-3 text-sm">{status}</p>}
-    </aside>
+
+    <section className="rounded-xl border border-border bg-surface p-5">
+      <div className="flex items-center justify-between gap-4"><div><h2 className="text-xl font-semibold">Room Dimensions</h2><p className="text-sm text-muted">Enter length, width, and wall height to calculate gross wall surface.</p></div><button onClick={() => removeRoom(activeIndex)} className="text-sm font-semibold text-red-700">Remove room</button></div>
+      <label className="mt-4 block text-sm font-medium">Room name<input value={active.name} onChange={event => updateRoom({name:event.target.value})} className="mt-1 min-h-11 w-full rounded-lg border border-border px-3"/></label>
+      <div className="mt-4 grid gap-4 sm:grid-cols-3">{numeric("Length","length","ft")}{numeric("Width","width","ft")}{numeric("Wall Height","height","ft")}</div>
+    </section>
+
+    <section className="rounded-xl border border-border bg-surface p-5">
+      <div className="flex items-center justify-between"><div><h2 className="text-xl font-semibold">Windows and Openings</h2><p className="text-sm text-muted">Each opening subtracts from this room’s gross wall area.</p></div><button onClick={addOpening} className="min-h-11 rounded-lg border border-brand px-4 font-semibold text-brand">Add Window</button></div>
+      <div className="mt-4 space-y-3">{active.openings.map(opening => <div key={opening.id} className="grid gap-3 rounded-lg bg-background p-3 sm:grid-cols-5">
+        <label className="text-sm">Name<input value={opening.name} onChange={e=>updateOpening(opening.id,{name:e.target.value})} className="mt-1 min-h-11 w-full rounded-lg border px-3"/></label>
+        <NumericInput label="Width" value={opening.width} suffix="ft" onChange={value=>updateOpening(opening.id,{width:value})}/>
+        <NumericInput label="Height" value={opening.height} suffix="ft" onChange={value=>updateOpening(opening.id,{height:value})}/>
+        <NumericInput label="Quantity" value={opening.quantity} onChange={value=>updateOpening(opening.id,{quantity:value})}/>
+        <button onClick={()=>updateRoom({openings:active.openings.filter(item=>item.id!==opening.id)})} className="self-end min-h-11 text-sm font-semibold text-red-700">Remove</button>
+      </div>)}</div>
+    </section>
+
+    <section className="rounded-xl border border-border bg-surface p-5"><h2 className="text-xl font-semibold">Labor Setup</h2>
+      <div className="mt-4 grid gap-4 sm:grid-cols-3">{numeric("Number of Workers","workers")}{numeric("Average Hourly Wage","wageDollars",undefined,"$")}{numeric("Prep Hours","prepHours","person-hr")}</div>
+      <p className="mt-2 text-xs text-muted">Enter the total estimated person-hours required for preparation.</p>
+    </section>
+
+    <section className="rounded-xl border border-border bg-surface p-5"><h2 className="text-xl font-semibold">Choose Your Paint</h2>
+      <PaintSelector brands={brands} value={active.paint} onChange={paint=>updateRoom({paint})}/>
+      <div className="mt-4 grid gap-4 sm:grid-cols-3">{numeric("Number of Coats","coats")}{numeric("Coverage","coverage","ft²/gal")}{numeric("Waste","waste","%")}{numeric("Container Size","containerSizeGallons","gal")}{numeric("Container Quantity","containerQuantity")}{numeric("Price per Container","pricePerContainerDollars",undefined,"$")}</div>
+      {calculation.result && <p className="mt-4 rounded-lg bg-background p-4 text-sm">Project total: <strong className="font-mono">{formatMoney(calculation.result.totals.customerEstimateCents)}</strong></p>}
+    </section>
+
+    <section className="rounded-xl bg-[#16251d] p-5 text-white">
+      <p className="text-sm text-emerald-100/70">Formula {ESTIMATION_ASSUMPTIONS.formulaVersion}. Company production, burden, and overhead assumptions are protected and automatically snapshotted.</p>
+      <NumericInput label="Target gross margin" value={margin} suffix="%" onChange={setMargin} className="mt-4 text-white"/>
+      {!calculation.valid && <p role="alert" className="mt-3 rounded-lg bg-amber-100 p-3 text-sm text-amber-950">{calculation.error}</p>}
+      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+        <button onClick={addRoom} className="min-h-12 rounded-lg border border-white/40 font-semibold">Add Room</button>
+        <button onClick={saveDraft} disabled={saving} className="min-h-12 rounded-lg bg-white font-semibold text-emerald-950 disabled:opacity-60">{saving ? "Saving…" : "Save as Draft"}</button>
+        <button onClick={approve} disabled={!calculation.valid} className="min-h-12 rounded-lg bg-emerald-400 font-semibold text-emerald-950 disabled:opacity-50">Approve Estimate</button>
+      </div>
+      {status && <p role="status" className="mt-3 text-sm">{status}</p>}
+    </section>
   </div>;
 }
-
-function Metric({ l, v }: { l: string; v: string }) { return <div><dt className="text-muted">{l}</dt><dd className="font-mono font-semibold">{v}</dd></div>; }
-function Row({ l, v }: { l: string; v: string }) { return <div className="flex justify-between gap-4"><dt>{l}</dt><dd className="font-mono">{v}</dd></div>; }
-function RetailerState({ name, message }: { name: string; message: string }) { return <div className="rounded-lg bg-background p-3"><p className="font-medium">{name}</p><p className="mt-1 text-xs text-muted">{message}</p></div>; }
