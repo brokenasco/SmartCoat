@@ -59,8 +59,8 @@ export const paintSearchResultSchema = z.object({
   interior_recommended: z.boolean().nullable(),
   exterior_recommended: z.boolean().nullable(),
   is_discontinued: z.boolean(),
-  matched_by: z.enum(["exact_code", "alias_code", "partial_code", "color_name"]),
-  rank: z.number().int().min(1).max(4),
+  matched_by: z.enum(["exact_code", "alias_code", "partial_code", "color_name", "brand"]),
+  rank: z.number().int().min(1).max(7),
 });
 
 export type PaintSearchResult = z.infer<typeof paintSearchResultSchema>;
@@ -72,6 +72,8 @@ export const estimatePaintSelectionSchema = z
     colorName: z.string().trim().max(160).nullable(),
     colorCode: z.string().trim().max(80).nullable(),
     productName: z.string().trim().max(160).nullable(),
+    productType: z.string().trim().max(120).nullable(),
+    projectUse: z.enum(["interior", "exterior", "interior_exterior", "specialty", "unknown"]),
     sheen: z.string().trim().max(80).nullable(),
     coverageRate: z.number().min(50).max(1000),
     coverageSource: z.enum([
@@ -82,6 +84,12 @@ export const estimatePaintSelectionSchema = z
     ]),
     coverageWasOverridden: z.boolean(),
     coverageOverrideReason: z.string().trim().max(500).nullable(),
+    containerSizeGallons: z.number().positive(),
+    containerQuantity: z.number().int().positive(),
+    pricePerContainerCents: z.number().int().nonnegative(),
+    retailerName: z.string().trim().max(160).nullable(),
+    notes: z.string().trim().max(1000).nullable(),
+    isManualEntry: z.boolean(),
   })
   .superRefine((value, context) => {
     if (

@@ -73,11 +73,19 @@ describe("paint match safety", () => {
       colorName: "Customer sample",
       colorCode: "CUSTOM",
       productName: null,
+      productType: null,
+      projectUse: "interior",
       sheen: null,
       coverageRate: 350,
       coverageSource: "manual_override",
       coverageWasOverridden: true,
       coverageOverrideReason: null,
+      containerSizeGallons: 1,
+      containerQuantity: 3,
+      pricePerContainerCents: 5000,
+      retailerName: null,
+      notes: null,
+      isManualEntry: true,
     });
     expect(result.success).toBe(false);
   });
