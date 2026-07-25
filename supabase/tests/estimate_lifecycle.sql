@@ -1,0 +1,15 @@
+begin;
+set local search_path = public, extensions;
+select plan(10);
+select has_table('public','estimate_approval_snapshots','approval snapshots exist');
+select has_table('public','estimate_status_history','status history exists');
+select has_table('public','room_openings','normalized room openings exist');
+select has_table('public','estimate_progress','estimate progress exists');
+select has_table('public','room_progress','room progress exists');
+select has_table('public','retailer_data_sources','retailer sources exist');
+select has_table('public','retailer_import_jobs','retailer jobs exist');
+select has_index('public','estimates','estimates_company_status_updated_idx','draft/approved list index exists');
+select is((select count(*)::integer from public.retailer_data_sources s join public.paint_retailers r on r.id=s.retailer_id where r.slug='lowes'),1,'Lowe''s source is separate');
+select is((select count(*)::integer from public.retailer_data_sources s join public.paint_retailers r on r.id=s.retailer_id where r.slug='home-depot'),1,'Home Depot source is separate');
+select * from finish();
+rollback;

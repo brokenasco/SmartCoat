@@ -12,10 +12,10 @@ const base: EstimateEngineInput = {
   projectPostalCode:"33601",pricingSource:"manual",pricingTimestamp:"2026-07-25T00:00:00.000Z",
 };
 
-describe("central estimate engine v3", () => {
+describe("central estimate engine v4", () => {
   it("calculates container purchases and true gross margin", () => {
     const result=calculateEstimate(base);
-    expect(result.formulaVersion).toBe("3.0.0");
+    expect(result.formulaVersion).toBe("4.0.0");
     expect(result.grossSurfaceAreaSqFt).toBe(432);
     expect(result.netPaintableAreaSqFt).toBe(400);
     expect(result.rawGallonsRequired).toBe(2.2);

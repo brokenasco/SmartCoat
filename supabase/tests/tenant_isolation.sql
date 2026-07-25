@@ -1,6 +1,7 @@
 -- Run after creating two test users/tenants in a disposable local database.
 -- These assertions intentionally fail if a request can see another tenant.
 begin;
+set local search_path = public, extensions;
 select plan(2);
 select set_config('request.jwt.claim.sub', :'tenant_a_user_id', true);
 select set_config('request.jwt.claim.role', 'authenticated', true);

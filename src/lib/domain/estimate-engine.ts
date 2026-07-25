@@ -1,6 +1,6 @@
 import Decimal from "decimal.js";
 
-export const ESTIMATE_FORMULA_VERSION = "3.0.0";
+export const ESTIMATE_FORMULA_VERSION = "4.0.0";
 export type Retailer = "home_depot" | "lowes" | "manual_supplier";
 export type Opening = { widthFeet: number; heightFeet: number; quantity?: number; kind: "window" | "door" | "other" };
 export type EstimateEngineInput = {
@@ -84,7 +84,9 @@ export function calculateEstimate(input: EstimateEngineInput) {
     : new Decimal(input.paintPricePerGallonCents ?? 0).mul(containerSizeGallons);
   const paintCost = pricePerContainer.mul(purchaseQuantity);
   const materialSubtotal = paintCost.plus(input.additionalMaterialsCents ?? 0);
-  const laborHours = adjustedCoverageRequirement.div(input.productionRateSqFtPerHour).plus(input.prepHours ?? 0);
+  // Waste affects paint purchasing, not the wall area a painter must cover.
+  const laborCoverageRequirement = netPaintableArea.mul(totalCoats);
+  const laborHours = laborCoverageRequirement.div(input.productionRateSqFtPerHour).plus(input.prepHours ?? 0);
   const elapsedCrewHours = laborHours.div(input.crewSize);
   const workingDays = elapsedCrewHours.div(input.productiveHoursPerDay);
   const wageCost = laborHours.mul(input.averageWageCentsPerHour);
