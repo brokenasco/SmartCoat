@@ -226,7 +226,7 @@ begin
 end $$;
 
 create or replace function public.approve_estimate(target_estimate uuid) returns uuid
-language plpgsql security definer set search_path=''
+language plpgsql security definer set search_path='extensions'
 as $$
 declare e public.estimates%rowtype; snapshot jsonb; project_id uuid;
 begin
