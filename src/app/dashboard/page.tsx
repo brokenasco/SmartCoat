@@ -17,7 +17,7 @@ export default async function Dashboard() {
   const { data: membership } = await supabase.from("company_memberships").select("company_id, role, companies(name)").eq("user_id", user.id).eq("status", "active").limit(1).single();
   if (!membership) redirect("/login?error=onboarding");
   const { hasPremiumAccess } = await getCompanyEntitlement(supabase, membership.company_id);
-  const { data: estimates } = await supabase.from("estimates").select("id,title,status,total_cents,created_at").eq("company_id", membership.company_id).order("created_at", { ascending: false }).limit(8);
+  const { data: estimates } = await supabase.from("estimates").select("id,title,status,total_cents,created_at").eq("company_id", membership.company_id).is("deleted_at",null).order("created_at", { ascending: false }).limit(8);
   const pipeline = (estimates ?? []).reduce((sum, estimate) => sum + estimate.total_cents, 0);
   const company = Array.isArray(membership.companies) ? membership.companies[0] : membership.companies;
   return <main className="min-h-screen">

@@ -9,7 +9,20 @@ const room = (overrides: Partial<RoomEstimateInput> = {}): RoomEstimateInput => 
   pricingSource: "manual", pricingTimestamp: "2026-07-25T00:00:00Z", ...overrides,
 });
 
-describe("formula v4 multi-room estimates", () => {
+describe("formula v5 multi-room estimates", () => {
+  it("applies protected material waste once without increasing labor", () => {
+    const result=calculateMultiRoomEstimate([room({
+      lengthFeet:15,widthFeet:12,heightFeet:8,coats:1,
+      openings:[
+        {kind:"window",widthFeet:3,heightFeet:4,quantity:1},
+        {kind:"door",widthFeet:3,heightFeet:7,quantity:1},
+      ],
+    })],25).rooms[0];
+    expect(result.netPaintableAreaSqFt).toBe(399);
+    expect(result.adjustedCoverageSqFt).toBe(458.85);
+    expect(result.rawGallonsRequired).toBe(1.147);
+    expect(result.laborHours).toBeCloseTo(399/150,2);
+  });
   it("uses 150 square feet per paint person-hour", () => {
     expect(calculateMultiRoomEstimate([room()], 45).rooms[0].laborHours).toBe(1);
   });

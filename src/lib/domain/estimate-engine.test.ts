@@ -12,10 +12,10 @@ const base: EstimateEngineInput = {
   projectPostalCode:"33601",pricingSource:"manual",pricingTimestamp:"2026-07-25T00:00:00.000Z",
 };
 
-describe("central estimate engine v4", () => {
+describe("central estimate engine v5", () => {
   it("calculates container purchases and true gross margin", () => {
     const result=calculateEstimate(base);
-    expect(result.formulaVersion).toBe("4.0.0");
+    expect(result.formulaVersion).toBe("5.0.0");
     expect(result.grossSurfaceAreaSqFt).toBe(432);
     expect(result.netPaintableAreaSqFt).toBe(400);
     expect(result.rawGallonsRequired).toBe(2.2);
@@ -25,6 +25,19 @@ describe("central estimate engine v4", () => {
     expect(result.excessGallons).toBe(0.8);
     expect(result.paintCostCents).toBe(14394);
     expect(result.expectedGrossMarginPercent).toBe(45);
+  });
+  it("deducts only openings selected for paintable-area subtraction", () => {
+    const result=calculateEstimate({...base,room:{lengthFeet:15,widthFeet:12,heightFeet:8},coats:1,wastePercent:15,openings:[
+      {kind:"window",widthFeet:3,heightFeet:4,quantity:1,subtractFromPaintableArea:true},
+      {kind:"door",widthFeet:3,heightFeet:7,quantity:1,subtractFromPaintableArea:true},
+      {kind:"archway",widthFeet:2,heightFeet:7,quantity:1,subtractFromPaintableArea:false},
+    ]});
+    expect(result.grossSurfaceAreaSqFt).toBe(432);
+    expect(result.deductedOpeningAreaSqFt).toBe(33);
+    expect(result.netPaintableAreaSqFt).toBe(399);
+    expect(result.adjustedCoverageSqFt).toBe(458.85);
+    expect(result.rawGallonsRequired).toBe(1.147);
+    expect(result.laborHours).toBeCloseTo((399/150)+2,2);
   });
 
   it("does not double-count workers in wage cost", () => {

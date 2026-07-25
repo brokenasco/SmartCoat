@@ -1,8 +1,14 @@
 import Decimal from "decimal.js";
 
-export const ESTIMATE_FORMULA_VERSION = "4.0.0";
+export const ESTIMATE_FORMULA_VERSION = "5.0.0";
 export type Retailer = "home_depot" | "lowes" | "manual_supplier";
-export type Opening = { widthFeet: number; heightFeet: number; quantity?: number; kind: "window" | "door" | "other" };
+export type Opening = {
+  widthFeet: number;
+  heightFeet: number;
+  quantity?: number;
+  kind: "window" | "door" | "archway" | "closet_opening" | "pass_through" | "other";
+  subtractFromPaintableArea?: boolean;
+};
 export type EstimateEngineInput = {
   room: { lengthFeet: number; widthFeet: number; heightFeet: number };
   openings: Opening[];
@@ -56,6 +62,7 @@ export function calculateEstimate(input: EstimateEngineInput) {
   const grossSurfaceArea = perimeter.mul(input.room.heightFeet);
   const openingArea = input.openings.reduce((sum, opening) => {
     if (opening.widthFeet < 0 || opening.heightFeet < 0 || (opening.quantity ?? 1) < 0) throw new RangeError("Opening dimensions cannot be negative.");
+    if (opening.subtractFromPaintableArea === false) return sum;
     return sum.plus(new Decimal(opening.widthFeet).mul(opening.heightFeet).mul(opening.quantity ?? 1));
   }, new Decimal(0));
   const warnings: string[] = [];

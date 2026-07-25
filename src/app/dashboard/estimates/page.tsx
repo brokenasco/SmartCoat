@@ -17,12 +17,12 @@ export default async function EstimatesPage({ searchParams }: { searchParams: Pr
   const { data: membership } = await supabase.from("company_memberships").select("company_id").eq("user_id",user.id).eq("status","active").limit(1).single();
   if (!membership) redirect("/dashboard");
   const counts = await Promise.all([
-    supabase.from("estimates").select("id",{count:"exact",head:true}).eq("company_id",membership.company_id).eq("status","draft"),
-    supabase.from("estimates").select("id",{count:"exact",head:true}).eq("company_id",membership.company_id).eq("status","approved"),
+    supabase.from("estimates").select("id",{count:"exact",head:true}).eq("company_id",membership.company_id).eq("status","draft").is("deleted_at",null),
+    supabase.from("estimates").select("id",{count:"exact",head:true}).eq("company_id",membership.company_id).eq("status","approved").is("deleted_at",null),
   ]);
   let query = supabase.from("estimates")
     .select("id,estimate_number,title,status,total_cents,created_at,updated_at,approved_at,draft_payload,properties(address_line_1,city,postal_code),customers(name)",{count:"exact"})
-    .eq("company_id",membership.company_id).eq("status",tab)
+    .eq("company_id",membership.company_id).eq("status",tab).is("deleted_at",null)
     .order(tab==="draft" ? "updated_at" : "approved_at",{ascending:false})
     .range((page-1)*PAGE_SIZE,page*PAGE_SIZE-1);
   if (q) query=query.or(`title.ilike.%${q.replaceAll(",","")}%,estimate_number.eq.${Number(q)||0}`);

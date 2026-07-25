@@ -1,9 +1,12 @@
 begin;
 set local search_path = public, extensions;
-select plan(10);
+select plan(13);
 select has_table('public','estimate_approval_snapshots','approval snapshots exist');
 select has_table('public','estimate_status_history','status history exists');
 select has_table('public','room_openings','normalized room openings exist');
+select has_column('public','room_openings','subtract_from_paintable_area','openings support optional deductions');
+select has_column('public','estimates','deleted_at','draft soft deletion is available');
+select has_function('public','delete_estimate_draft',array['uuid','text'],'manager draft deletion RPC exists');
 select has_table('public','estimate_progress','estimate progress exists');
 select has_table('public','room_progress','room progress exists');
 select has_table('public','retailer_data_sources','retailer sources exist');

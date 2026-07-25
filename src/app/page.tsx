@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, Calculator, Check, Clock3, Gauge, PaintBucket, Ruler, ShieldCheck, Sparkles, Users } from "lucide-react";
 
-const process=[["01","Enter room dimensions","Capture the room, walls, windows, and doors."],["02","Select paint and materials","Make coverage, coats, waste, and pricing explicit."],["03","Configure labor and margin","Separate hours, crew duration, burden, overhead, and gross margin."],["04","Generate the estimate","Review contractor cost, customer price, profit, and assumptions."]];
+const process=[["01","Enter room dimensions","Capture the room, walls, windows, and doors."],["02","Select paint and materials","Make coverage rate, coats, containers, and pricing explicit."],["03","Configure labor and margin","Separate hours, crew duration, burden, overhead, and gross margin."],["04","Generate the estimate","Review contractor cost, customer price, profit, and assumptions."]];
 const benefits=[[Clock3,"Estimate faster","Move from takeoff to an explainable price without rebuilding spreadsheets."],[PaintBucket,"Reduce material mistakes","Subtract openings and round up to purchasable paint quantities."],[Gauge,"Price consistently","Use the same margin and cost formula for every estimate."],[Users,"Plan the crew","Keep total labor hours separate from elapsed crew duration."],[ShieldCheck,"Protect profit","See wages, burden, overhead, and expected gross profit before presenting price."],[Calculator,"Present professionally","Create a clear calculation snapshot ready for customer workflows."]];
 
 export default function Home(){return <main className="overflow-hidden">

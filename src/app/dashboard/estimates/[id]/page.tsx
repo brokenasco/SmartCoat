@@ -8,7 +8,7 @@ export default async function ApprovedEstimate({params}:{params:Promise<{id:stri
   const {id}=await params;const supabase=await createClient();const {data:{user}}=await supabase.auth.getUser();if(!user)redirect("/login");
   const {data:membership}=await supabase.from("company_memberships").select("company_id,role").eq("user_id",user.id).eq("status","active").limit(1).single();if(!membership)redirect("/dashboard");
   const [{data:estimate},{data:snapshot},{data:progress}]=await Promise.all([
-    supabase.from("estimates").select("id,title,status,estimate_number,total_cents,approved_at,formula_version").eq("id",id).eq("company_id",membership.company_id).single(),
+    supabase.from("estimates").select("id,title,status,estimate_number,total_cents,approved_at,formula_version").eq("id",id).eq("company_id",membership.company_id).is("deleted_at",null).single(),
     supabase.from("estimate_approval_snapshots").select("snapshot,snapshot_hash").eq("estimate_id",id).maybeSingle(),
     supabase.from("estimate_progress").select("status,completion_percent,progress_notes").eq("estimate_id",id).maybeSingle(),
   ]);if(!estimate)notFound();if(estimate.status==="draft")redirect(`/dashboard/estimates/${id}/edit`);

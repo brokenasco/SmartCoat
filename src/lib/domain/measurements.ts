@@ -21,7 +21,9 @@ export function calculateRoom(dimensions: RoomDimensions) {
   };
 }
 
-export function paintGallons(area: number, coveragePerGallon: number, coats: number, wastePercent = 10) {
+import { ESTIMATION_ASSUMPTIONS } from "./estimation-config";
+
+export function paintGallons(area: number, coveragePerGallon: number, coats: number, wastePercent: number = ESTIMATION_ASSUMPTIONS.paintWastePercent) {
   if (area < 0 || coveragePerGallon <= 0 || coats <= 0 || wastePercent < 0) throw new RangeError("Invalid paint calculation input.");
   const calculated = (area * coats * (1 + wastePercent / 100)) / coveragePerGallon;
   return { calculated, purchaseQuantity: Math.ceil(calculated) };
