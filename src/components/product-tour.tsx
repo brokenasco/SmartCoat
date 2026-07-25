@@ -13,7 +13,7 @@ type Demo = {
   workers: string; wage: string; margin: number; zip: string;
   coats: number; coverage: number; waste: number;
 };
-const initial: Demo = { length:"",width:"",height:"",w1w:"",w1h:"",w2w:"",w2h:"",workers:"",wage:"",margin:45,zip:"",coats:2,coverage:400,waste:10 };
+const initial: Demo = { length:"",width:"",height:"",w1w:"",w1h:"",w2w:"",w2h:"",workers:"",wage:"",margin:45,zip:"",coats:2,coverage:400,waste:15 };
 const num = (value: string) => {
   const result = parseNumericInput(value);
   return result.state === "valid" ? result.value : null;
@@ -41,7 +41,7 @@ export function ProductTour({ settingsMode=false }: { settingsMode?: boolean }) 
       containerSizeGallons:1,pricePerContainerCents:4798,
       productionRateSqFtPerHour:150,prepHours:2,crewSize:values[7]!,
       averageWageCentsPerHour:Math.round(values[8]!*100),laborBurdenPercent:20,
-      overheadPercent:10,targetGrossMarginPercent:form.margin,productiveHoursPerDay:8,
+      overheadPercent:15,targetGrossMarginPercent:form.margin,productiveHoursPerDay:8,
       retailer:"manual_supplier",projectPostalCode:form.zip,pricingSource:"manual",
       pricingTimestamp:"2026-07-25T00:00:00.000Z",
     });
@@ -63,7 +63,7 @@ export function ProductTour({ settingsMode=false }: { settingsMode?: boolean }) 
     <Panel key="welcome" title="Build one transparent room estimate." copy="SmartCoat calculates paint quantity, container cost, labor, crew duration, target margin, and a customer-ready price. This demo never creates production records."><div className="tour-hero"><Sparkles/><strong>Ten guided steps</strong><span>You enter the scope. Formula v3 explains every result.</span></div></Panel>,
     <Panel key="room" title="Enter the sample room." copy="Room perimeter × wall height gives gross wall surface area. Blank and partial numeric values are safe while editing."><div className="tour-form-grid"><Field label="Length (ft)" value={form.length} onChange={v=>patch("length",v)} placeholder="15"/><Field label="Width (ft)" value={form.width} onChange={v=>patch("width",v)} placeholder="12"/><Field label="Wall height (ft)" value={form.height} onChange={v=>patch("height",v)} placeholder="8"/></div></Panel>,
     <Panel key="openings" title="Subtract two windows." copy="Openings are removed from paintable wall area."><div className="tour-form-grid"><Field label="Window 1 width" value={form.w1w} onChange={v=>patch("w1w",v)} placeholder="3"/><Field label="Window 1 height" value={form.w1h} onChange={v=>patch("w1h",v)} placeholder="4"/><Field label="Window 2 width" value={form.w2w} onChange={v=>patch("w2w",v)} placeholder="4"/><Field label="Window 2 height" value={form.w2h} onChange={v=>patch("w2h",v)} placeholder="5"/></div><div className="tour-equation"><span>{result?.grossSurfaceAreaSqFt??"—"} ft²<small>gross wall</small></span><b>−</b><span>{result?.deductedOpeningAreaSqFt??"—"} ft²<small>windows</small></span><b>=</b><span className="accent">{result?.netPaintableAreaSqFt??"—"} ft²<small>paintable</small></span></div></Panel>,
-    <Panel key="paint" title="Specify the paint system." copy="A color code identifies color only. Product, sheen, coverage, coats, container, and price must be confirmed separately."><div className="paint-card"><div className="swatch"/><div><strong>Behr · DC-001</strong><span>Whipped Cream · verified color</span><span>400 ft²/gal · 2 coats · 10% waste</span><span>Product and sheen not assumed</span></div></div></Panel>,
+    <Panel key="paint" title="Specify the paint system." copy="A color code identifies color only. Product, sheen, coverage rate, coats, container, and price must be confirmed separately."><div className="paint-card"><div className="swatch"/><div><strong>Behr · DC-001</strong><span>Whipped Cream · verified color</span><span>400 ft²/gal · 2 coats</span><span>Product and sheen not assumed</span></div></div></Panel>,
     <Panel key="crew" title="Choose the crew size." copy="Crew size changes elapsed duration, not total person-hours."><Field label="Number of workers" value={form.workers} onChange={v=>patch("workers",v)} placeholder="2"/></Panel>,
     <Panel key="wage" title="Enter average worker pay." copy="Average Hourly Wage is paid to one worker. Total wage cost equals total person-hours × average hourly wage; workers are not counted twice."><Field label="Average Hourly Wage per Worker ($)" value={form.wage} onChange={v=>patch("wage",v)} placeholder="25"/></Panel>,
     <Panel key="margin" title="Set a true target gross margin." copy="Customer price = contractor cost ÷ (1 − target margin). This is gross margin, not markup."><label className="block font-medium">Target gross margin <strong className="float-right text-brand">{form.margin}%</strong><input aria-label="Target gross margin percentage" className="mt-5 w-full accent-emerald-600" type="range" min="0" max="70" step="1" value={form.margin} onChange={event=>patch("margin",Number(event.target.value))}/></label></Panel>,

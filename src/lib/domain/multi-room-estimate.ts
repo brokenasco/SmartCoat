@@ -30,7 +30,7 @@ export function calculateMultiRoomEstimate(rooms: RoomEstimateInput[], targetGro
       openings: room.openings,
       coats: room.coats,
       coverageSqFtPerGallon: room.coverageSqFtPerGallon,
-      wastePercent: room.wastePercent,
+      wastePercent: ESTIMATION_ASSUMPTIONS.paintWastePercent,
       containerSizeGallons: room.containerSizeGallons,
       containerQuantity: room.containerQuantity,
       pricePerContainerCents: room.pricePerContainerCents,
@@ -52,11 +52,15 @@ export function calculateMultiRoomEstimate(rooms: RoomEstimateInput[], targetGro
     return { roomId: room.id, roomName: room.name, ...result };
   });
   const sum = (field: keyof typeof results[number]) => results.reduce((total, result) => total + (typeof result[field] === "number" ? result[field] as number : 0), 0);
+  const contractorCostCents = sum("totalContractorCostCents");
+  const customerEstimateCents = Math.round(contractorCostCents / (1 - targetGrossMarginPercent / 100));
   return {
     formulaVersion: ESTIMATION_ASSUMPTIONS.formulaVersion,
     assumptions: ESTIMATION_ASSUMPTIONS,
     rooms: results,
     totals: {
+      grossWallAreaSqFt: sum("grossSurfaceAreaSqFt"),
+      openingAreaSqFt: sum("deductedOpeningAreaSqFt"),
       netPaintableAreaSqFt: sum("netPaintableAreaSqFt"),
       rawGallonsRequired: sum("rawGallonsRequired"),
       gallonsPurchased: sum("gallonsPurchased"),
@@ -64,8 +68,9 @@ export function calculateMultiRoomEstimate(rooms: RoomEstimateInput[], targetGro
       laborPersonHours: sum("laborHours"),
       loadedLaborCostCents: sum("totalLaborCostCents"),
       overheadCents: sum("overheadCents"),
-      contractorCostCents: sum("totalContractorCostCents"),
-      customerEstimateCents: sum("customerEstimateCents"),
+      contractorCostCents,
+      customerEstimateCents,
+      expectedGrossProfitCents: customerEstimateCents - contractorCostCents,
       estimatedElapsedHours: sum("estimatedElapsedHours"),
     },
   };
