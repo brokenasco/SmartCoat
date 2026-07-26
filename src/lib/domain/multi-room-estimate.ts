@@ -26,7 +26,6 @@ export type RoomEstimateInput = {
 export function calculateMultiRoomEstimate(
   rooms: RoomEstimateInput[],
   targetGrossMarginPercent: number,
-  projectLevelDirectMaterialsCents = 0,
 ) {
   if (!rooms.length) throw new RangeError("At least one room is required.");
   const results = rooms.map(room => {
@@ -60,7 +59,6 @@ export function calculateMultiRoomEstimate(
   const sum = (field: keyof typeof results[number]) => results.reduce((total, result) => total + (typeof result[field] === "number" ? result[field] as number : 0), 0);
   const project = calculateProjectEstimate({
     rooms: results.map(result=>({roomId:result.roomId,directCostCents:result.directCostCents})),
-    projectLevelDirectMaterialsCents,
     overheadPercent: ESTIMATION_ASSUMPTIONS.overheadPercent,
     targetGrossMarginPercent,
   });
@@ -77,8 +75,7 @@ export function calculateMultiRoomEstimate(
       paintCostCents: sum("paintCostCents"),
       laborPersonHours: sum("laborHours"),
       loadedLaborCostCents: sum("totalLaborCostCents"),
-      otherDirectMaterialsCents: project.projectLevelDirectMaterialsCents,
-      directCostCents: project.adjustedProjectDirectCostCents,
+      directCostCents: project.projectDirectCostCents,
       overheadCents: project.overheadCents,
       contractorCostCents: project.totalInternalCostCents,
       customerEstimateCents: project.finalCustomerEstimateCents,

@@ -21,7 +21,6 @@ export function EstimateSummary({ result, targetMargin }: {
         <SummaryRow label="Paint Cost" value={formatMoney(result.totals.paintCostCents)}/>
         <SummaryRow label="Labor Person-Hours" value={result.totals.laborPersonHours.toFixed(2)}/>
         <SummaryRow label="Loaded Labor Cost" value={formatMoney(result.totals.loadedLaborCostCents)}/>
-        <SummaryRow label="Other Direct Materials" value={formatMoney(result.totals.otherDirectMaterialsCents)}/>
         <SummaryRow label="Project Direct Cost" value={formatMoney(result.totals.directCostCents)}/>
         <SummaryRow label="Overhead" value={formatMoney(result.totals.overheadCents)}/>
         <SummaryRow label="Total Internal Cost" value={formatMoney(result.totals.contractorCostCents)}/>

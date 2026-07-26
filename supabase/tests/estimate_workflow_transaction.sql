@@ -1,6 +1,6 @@
 begin;
 set local search_path = public, extensions;
-select plan(15);
+select plan(17);
 select set_config('request.jwt.claim.sub',(
   select user_id::text from public.company_memberships
   where status='active' and role in ('owner','admin','manager') order by created_at limit 1
@@ -20,6 +20,8 @@ select is((select count(*)::integer from public.estimate_status_history where es
 select is((select number_of_workers from public.estimates where id=(select estimate_id from workflow_ids)),2,'shared worker count persisted');
 select is((select average_hourly_wage_cents::integer from public.estimates where id=(select estimate_id from workflow_ids)),2500,'shared wage persisted');
 select is((select prep_person_hours_per_room from public.estimates where id=(select estimate_id from workflow_ids)),2.00::numeric,'shared prep hours persisted');
+select is((select other_direct_materials_cents from public.estimates where id=(select estimate_id from workflow_ids)),0::bigint,'new drafts do not persist other direct materials');
+select ok(has_function_privilege('authenticated','private.surface_modifier(text)','EXECUTE'),'room snapshot dependency is executable by authenticated writes');
 update workflow_ids set project_id=public.approve_estimate(estimate_id);
 select is((select status::text from public.estimates where id=(select estimate_id from workflow_ids)),'approved','draft approved');
 select ok((select project_id is not null from workflow_ids),'project initialized');

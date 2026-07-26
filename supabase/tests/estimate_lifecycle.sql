@@ -13,7 +13,7 @@ select has_column('public','estimates','average_hourly_wage_cents','estimates sn
 select has_column('public','estimates','prep_person_hours_per_room','estimates snapshot prep person-hours per room');
 select has_index('public','estimate_status_history','estimate_status_history_estimate_changed_idx','history lookup is indexed');
 select policies_are('public','estimate_status_history',array['estimate_history_insert','estimate_history_read'],'history has only scoped read and insert policies');
-select has_column('public','estimates','other_direct_materials_cents','estimates snapshot other direct materials');
+select has_column('public','estimates','other_direct_materials_cents','legacy other-materials values remain readable');
 select policy_cmd_is('public','audit_logs','audit_logs_insert_authorized','INSERT','authorized draft audit insert policy exists');
 select has_function('public','delete_estimate_draft',array['uuid','text'],'manager draft deletion RPC exists');
 select has_table('public','estimate_progress','estimate progress exists');

@@ -22,7 +22,7 @@ type RoomDraft = {
   openings: OpeningDraft[]; paintBrand: string; paintColorCode: string;
   paint?: { brandName?: string | null; colorCode?: string | null };
 };
-type DraftPayload = { rooms: RoomDraft[]; targetGrossMarginPercent?: number; otherDirectMaterialsDollars?: string };
+type DraftPayload = { rooms: RoomDraft[]; targetGrossMarginPercent?: number };
 
 const roomDraft = (position: number, inherit?: RoomDraft): RoomDraft => ({
   id: crypto.randomUUID(), name: `Room ${position}`, length: "", width: "", height: "", surfaceType: "",
@@ -35,7 +35,7 @@ const numberValue = (raw: string) => {
   const parsed = parseNumericInput(raw);
   return parsed.state === "valid" ? parsed.value : null;
 };
-function calculateDraft(rooms: RoomDraft[], margin: string, otherDirectMaterials: string) {
+function calculateDraft(rooms: RoomDraft[], margin: string) {
   try {
     const targetMargin = numberValue(margin);
     if (targetMargin === null) throw new Error("Enter a valid target gross margin.");
@@ -66,9 +66,7 @@ function calculateDraft(rooms: RoomDraft[], margin: string, otherDirectMaterials
         retailer: "manual_supplier" as const, pricingSource: "manual" as const, pricingTimestamp: new Date().toISOString(),
       };
     });
-    const otherMaterials = numberValue(otherDirectMaterials);
-    if (otherMaterials === null || otherMaterials < 0) throw new Error("Enter valid other direct materials.");
-    return { valid: true as const, result: calculateMultiRoomEstimate(inputs, targetMargin, Math.round(otherMaterials*100)), error: "" };
+    return { valid: true as const, result: calculateMultiRoomEstimate(inputs, targetMargin), error: "" };
   } catch (error) {
     return { valid: false as const, result: null, error: error instanceof Error ? error.message : "Estimate is incomplete." };
   }
@@ -79,7 +77,11 @@ export function friendlyEstimateError(error: { code?: string; message?: string }
   if (error.code === "PGRST301" || message.includes("jwt") || message.includes("session")) {
     return "Your session has expired. Sign in again to continue.";
   }
-  if (error.code === "42501" || message === "not authorized" || message.includes("manager permission required")) {
+  if (
+    message === "not authorized"
+    || message.includes("manager permission required")
+    || message.includes("row-level security")
+  ) {
     return "You do not have permission to update this estimate.";
   }
   if (error.code === "PGRST116" || message.includes("not found")) return "This estimate could not be found.";
@@ -123,14 +125,13 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
     : [roomDraft(1)]));
   const [activeIndex, setActiveIndex] = useState(0);
   const [margin, setMargin] = useState(String(initialMargin ?? initialPayload?.targetGrossMarginPercent ?? ESTIMATION_ASSUMPTIONS.defaultGrossMarginPercent));
-  const [otherDirectMaterials, setOtherDirectMaterials] = useState(initialPayload?.otherDirectMaterialsDollars ?? "0.00");
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
   const [addingRoom, setAddingRoom] = useState(false);
   const roomAddPending = useRef(false);
   const active = rooms[activeIndex];
 
-  const calculation = useMemo(() => calculateDraft(rooms, margin, otherDirectMaterials), [rooms, margin, otherDirectMaterials]);
+  const calculation = useMemo(() => calculateDraft(rooms, margin), [rooms, margin]);
   const activeResult = calculation.result?.rooms.find(result => result.roomId === active.id);
 
   function updateRoom(patch: Partial<RoomDraft>) {
@@ -174,10 +175,9 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
     if (saving) return;
     setSaving(true); setStatus("Saving draft…");
     const synchronizedRooms = synchronizeRoomLabor(roomsToSave);
-    const savedCalculation = calculateDraft(synchronizedRooms, margin, otherDirectMaterials);
+    const savedCalculation = calculateDraft(synchronizedRooms, margin);
     const payload = {
       targetGrossMarginPercent: numberValue(margin) ?? ESTIMATION_ASSUMPTIONS.defaultGrossMarginPercent,
-      otherDirectMaterialsDollars: otherDirectMaterials,
       rooms: synchronizedRooms.map((room, sortOrder) => ({
         ...room,
         paintBrand: room.paintBrand.trim(),
@@ -254,7 +254,6 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
     <main className="min-w-0 space-y-6">
     <section className="rounded-xl border border-border bg-surface p-5">
       <label className="block text-sm font-medium">Estimate name<input value={title} onChange={event => setTitle(event.target.value)} placeholder="Untitled draft" className="mt-1 min-h-11 w-full rounded-lg border border-border px-3"/></label>
-      <NumericInput className="mt-4" label="Other Direct Materials" value={otherDirectMaterials} prefix="$" min={0} onChange={value=>setOtherDirectMaterials(value)}/>
       <div className="mt-5 border-t border-border pt-5">
         <h2 className="text-xl font-semibold">Labor Setup</h2>
         <p className="mt-1 text-sm text-muted">These labor settings apply to every room in this estimate.</p>
