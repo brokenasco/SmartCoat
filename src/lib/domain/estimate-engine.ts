@@ -2,7 +2,7 @@ import Decimal from "decimal.js";
 import { calculatePaintGallons } from "./paint-materials";
 import type { SurfaceTypeKey } from "./surface-types";
 
-export const ESTIMATE_FORMULA_VERSION = "6.0.0";
+export const ESTIMATE_FORMULA_VERSION = "7.0.0";
 export type Retailer = "home_depot" | "lowes" | "manual_supplier";
 export type Opening = {
   widthFeet: number;
@@ -150,7 +150,7 @@ export function calculateEstimate(input: EstimateEngineInput) {
     crewSize: input.crewSize, estimatedElapsedHours: elapsedCrewHours.toDecimalPlaces(2).toNumber(),
     estimatedWorkingDays: workingDays.toDecimalPlaces(2).toNumber(), wageCostCents: money(wageCost),
     laborBurdenCents: money(laborBurden), totalLaborCostCents: money(totalLaborCost),
-    overheadCents: money(overhead), totalContractorCostCents: money(contractorCost),
+    directCostCents: money(directCost), overheadCents: money(overhead), totalContractorCostCents: money(contractorCost),
     targetGrossMarginPercent: input.targetGrossMarginPercent, customerSubtotalCents: money(customerSubtotal),
     taxCents: money(tax), customerEstimateCents: money(customerEstimate), expectedGrossProfitCents: money(grossProfit),
     expectedGrossMarginPercent: grossMargin.toDecimalPlaces(2).toNumber(), warnings,

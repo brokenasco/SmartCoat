@@ -3,14 +3,14 @@ import { calculateMultiRoomEstimate, type RoomEstimateInput } from "./multi-room
 
 const room = (overrides: Partial<RoomEstimateInput> = {}): RoomEstimateInput => ({
   id: crypto.randomUUID(), name: "Room 1", lengthFeet: 10, widthFeet: 8, heightFeet: 4.1666667,
-  openings: [], coats: 1, coverageSqFtPerGallon: 400, wastePercent: 0,
+  openings: [], coats: 1, wastePercent: 0,
   surfaceType: "smooth_previously_painted_drywall",
   containerSizeGallons: 1, pricePerContainerCents: 5000, crewSize: 2,
   averageWageCentsPerHour: 2500, prepPersonHours: 0, retailer: "manual_supplier",
   pricingSource: "manual", pricingTimestamp: "2026-07-25T00:00:00Z", ...overrides,
 });
 
-describe("formula v6 multi-room estimates", () => {
+describe("formula v7 multi-room estimates", () => {
   it("applies protected material waste once without increasing labor", () => {
     const result=calculateMultiRoomEstimate([room({
       lengthFeet:15,widthFeet:12,heightFeet:8,coats:1,
@@ -21,7 +21,7 @@ describe("formula v6 multi-room estimates", () => {
     })],25).rooms[0];
     expect(result.netPaintableAreaSqFt).toBe(399);
     expect(result.adjustedCoverageSqFt).toBe(458.85);
-    expect(result.rawGallonsRequired).toBe(1.147);
+    expect(result.rawGallonsRequired).toBe(1.224);
     expect(result.laborHours).toBeCloseTo(399/150,2);
   });
   it("uses 150 square feet per paint person-hour", () => {
@@ -33,7 +33,8 @@ describe("formula v6 multi-room estimates", () => {
   it("uses 20% burden and 15% overhead", () => {
     const result = calculateMultiRoomEstimate([room({ averageWageCentsPerHour: 10000 })], 0).rooms[0];
     expect(result.totalLaborCostCents).toBe(12000);
-    expect(result.overheadCents).toBe(Math.round((12000 + 5000) * 0.15));
+    expect(result.overheadCents).toBe(0);
+    expect(calculateMultiRoomEstimate([room({ averageWageCentsPerHour: 10000 })], 0).totals.overheadCents).toBe(Math.round((12000 + 5000) * 0.15));
   });
   it("calculates rooms independently", () => {
     const result = calculateMultiRoomEstimate([room(), room({ id: "two", averageWageCentsPerHour: 3000 })], 45);

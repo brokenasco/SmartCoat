@@ -16,7 +16,7 @@ const base: EstimateEngineInput = {
 describe("central estimate engine v6", () => {
   it("calculates container purchases and true gross margin", () => {
     const result=calculateEstimate(base);
-    expect(result.formulaVersion).toBe("6.0.0");
+    expect(result.formulaVersion).toBe("7.0.0");
     expect(result.grossSurfaceAreaSqFt).toBe(432);
     expect(result.netPaintableAreaSqFt).toBe(400);
     expect(result.rawGallonsRequired).toBe(2.2);

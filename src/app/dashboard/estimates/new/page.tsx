@@ -12,9 +12,8 @@ export default async function NewEstimate() {
   if (!membership) redirect("/dashboard");
   const { hasPremiumAccess } = await getCompanyEntitlement(supabase, membership.company_id);
   if (!hasPremiumAccess) redirect("/dashboard");
-  const { data: brands } = await supabase.from("paint_brands").select("id,name").eq("is_active", true).order("name");
   return <main className="min-h-screen">
     <header className="border-b border-border bg-surface"><div className="mx-auto max-w-7xl px-5 py-4"><Link href="/dashboard" className="text-sm font-semibold text-brand">← Dashboard</Link></div></header>
-    <div className="mx-auto max-w-7xl px-5 py-8"><p className="text-sm text-muted">Draft estimate</p><h1 className="mb-7 text-3xl font-semibold">Build a room estimate</h1><EstimateBuilder companyId={membership.company_id} brands={brands ?? []} canManageFinancials={["owner","admin","manager"].includes(membership.role)}/></div>
+    <div className="mx-auto max-w-7xl px-5 py-8"><p className="text-sm text-muted">Draft estimate</p><h1 className="mb-7 text-3xl font-semibold">Build a room estimate</h1><EstimateBuilder companyId={membership.company_id} canManageFinancials={["owner","admin","manager"].includes(membership.role)}/></div>
   </main>;
 }

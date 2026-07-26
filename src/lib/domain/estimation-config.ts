@@ -1,5 +1,6 @@
 export const ESTIMATION_ASSUMPTIONS = Object.freeze({
-  formulaVersion: "6.0.0",
+  formulaVersion: "7.0.0",
+  baseCoverageRateSqFtPerGallon: 375,
   productionRateSqFtPerPersonHour: 150,
   laborBurdenPercent: 20,
   overheadPercent: 15,

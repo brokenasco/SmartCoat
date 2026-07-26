@@ -1,6 +1,7 @@
 import { calculateEstimate, type EstimateEngineInput, type Opening } from "./estimate-engine";
 import { ESTIMATION_ASSUMPTIONS } from "./estimation-config";
 import type { SurfaceTypeKey } from "./surface-types";
+import { calculateProjectEstimate } from "./project-estimate";
 
 export type RoomEstimateInput = {
   id: string;
@@ -10,7 +11,6 @@ export type RoomEstimateInput = {
   heightFeet: number;
   openings: Opening[];
   coats: number;
-  coverageSqFtPerGallon: number;
   wastePercent: number;
   surfaceType: SurfaceTypeKey;
   containerSizeGallons: number;
@@ -31,7 +31,7 @@ export function calculateMultiRoomEstimate(rooms: RoomEstimateInput[], targetGro
       room: { lengthFeet: room.lengthFeet, widthFeet: room.widthFeet, heightFeet: room.heightFeet },
       openings: room.openings,
       coats: room.coats,
-      coverageSqFtPerGallon: room.coverageSqFtPerGallon,
+      coverageSqFtPerGallon: ESTIMATION_ASSUMPTIONS.baseCoverageRateSqFtPerGallon,
       wastePercent: ESTIMATION_ASSUMPTIONS.paintWastePercent,
       surfaceType: room.surfaceType,
       productModifier: ESTIMATION_ASSUMPTIONS.defaultProductModifier,
@@ -43,8 +43,8 @@ export function calculateMultiRoomEstimate(rooms: RoomEstimateInput[], targetGro
       crewSize: room.crewSize,
       averageWageCentsPerHour: room.averageWageCentsPerHour,
       laborBurdenPercent: ESTIMATION_ASSUMPTIONS.laborBurdenPercent,
-      overheadPercent: ESTIMATION_ASSUMPTIONS.overheadPercent,
-      targetGrossMarginPercent,
+      overheadPercent: 0,
+      targetGrossMarginPercent: 0,
       productiveHoursPerDay: ESTIMATION_ASSUMPTIONS.productiveHoursPerDay,
       retailer: room.retailer,
       pricingSource: room.pricingSource,
@@ -56,8 +56,11 @@ export function calculateMultiRoomEstimate(rooms: RoomEstimateInput[], targetGro
     return { roomId: room.id, roomName: room.name, ...result };
   });
   const sum = (field: keyof typeof results[number]) => results.reduce((total, result) => total + (typeof result[field] === "number" ? result[field] as number : 0), 0);
-  const contractorCostCents = sum("totalContractorCostCents");
-  const customerEstimateCents = Math.round(contractorCostCents / (1 - targetGrossMarginPercent / 100));
+  const project = calculateProjectEstimate({
+    rooms: results.map(result=>({roomId:result.roomId,directCostCents:result.directCostCents})),
+    overheadPercent: ESTIMATION_ASSUMPTIONS.overheadPercent,
+    targetGrossMarginPercent,
+  });
   return {
     formulaVersion: ESTIMATION_ASSUMPTIONS.formulaVersion,
     assumptions: ESTIMATION_ASSUMPTIONS,
@@ -71,10 +74,11 @@ export function calculateMultiRoomEstimate(rooms: RoomEstimateInput[], targetGro
       paintCostCents: sum("paintCostCents"),
       laborPersonHours: sum("laborHours"),
       loadedLaborCostCents: sum("totalLaborCostCents"),
-      overheadCents: sum("overheadCents"),
-      contractorCostCents,
-      customerEstimateCents,
-      expectedGrossProfitCents: customerEstimateCents - contractorCostCents,
+      directCostCents: project.roomDirectCostTotalCents,
+      overheadCents: project.overheadCents,
+      contractorCostCents: project.totalInternalCostCents,
+      customerEstimateCents: project.finalCustomerEstimateCents,
+      expectedGrossProfitCents: project.expectedGrossProfitCents,
       estimatedElapsedHours: sum("estimatedElapsedHours"),
     },
   };
