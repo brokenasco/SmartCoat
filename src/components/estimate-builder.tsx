@@ -10,11 +10,13 @@ import type { EstimatePaintSelection } from "@/lib/domain/paint-catalog";
 import { parseNumericInput } from "@/lib/domain/numeric-input";
 import { formatMoney } from "@/lib/domain/pricing";
 import { createClient } from "@/lib/supabase/browser";
+import { LEGACY_SURFACE_TYPE, SURFACE_TYPES, type SurfaceTypeKey } from "@/lib/domain/surface-types";
 
 type OpeningKind = "window" | "door" | "archway" | "closet_opening" | "pass_through" | "other";
 type OpeningDraft = { id: string; name: string; kind: OpeningKind; width: string; height: string; quantity: string; subtractFromPaintableArea?: boolean };
 type RoomDraft = {
   id: string; name: string; length: string; width: string; height: string;
+  surfaceType: SurfaceTypeKey | "";
   workers: string; wageDollars: string; prepHours: string; coats: string;
   coverage: string; containerSizeGallons: string;
   containerQuantity: string; pricePerContainerDollars: string;
@@ -30,7 +32,7 @@ const emptyPaint = (): EstimatePaintSelection => ({
   pricePerContainerCents: 0, retailerName: null, notes: null, isManualEntry: true,
 });
 const roomDraft = (position: number, inherit?: RoomDraft): RoomDraft => ({
-  id: crypto.randomUUID(), name: `Room ${position}`, length: "", width: "", height: "",
+  id: crypto.randomUUID(), name: `Room ${position}`, length: "", width: "", height: "", surfaceType: "",
   workers: inherit?.workers ?? "2", wageDollars: inherit?.wageDollars ?? "25.00",
   prepHours: inherit?.prepHours ?? "2", coats: "2", coverage: "400",
   containerSizeGallons: "1", containerQuantity: "1", pricePerContainerDollars: "",
@@ -53,7 +55,9 @@ export function EstimateBuilder({ companyId, brands, estimateId: startingId = nu
   const router = useRouter();
   const [estimateId, setEstimateId] = useState(startingId);
   const [title, setTitle] = useState(initialTitle);
-  const [rooms, setRooms] = useState<RoomDraft[]>(initialPayload?.rooms?.length ? initialPayload.rooms : [roomDraft(1)]);
+  const [rooms, setRooms] = useState<RoomDraft[]>(initialPayload?.rooms?.length
+    ? initialPayload.rooms.map(room => ({ ...room, surfaceType: room.surfaceType || LEGACY_SURFACE_TYPE }))
+    : [roomDraft(1)]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [margin, setMargin] = useState(String(initialMargin ?? initialPayload?.targetGrossMarginPercent ?? ESTIMATION_ASSUMPTIONS.defaultGrossMarginPercent));
   const [status, setStatus] = useState("");
@@ -74,10 +78,12 @@ export function EstimateBuilder({ companyId, brands, estimateId: startingId = nu
           container: numberValue(room.containerSizeGallons), quantity: numberValue(room.containerQuantity), price: numberValue(room.pricePerContainerDollars),
         };
         if (Object.values(values).some(value => value === null)) throw new Error(`${room.name}: complete required measurements, labor, and paint pricing.`);
+        if (!room.surfaceType) throw new Error(`${room.name}: select a surface type.`);
         if (!room.paint.productName?.trim()) throw new Error(`${room.name}: choose a product line or enter one manually.`);
         if (values.price! <= 0) throw new Error(`${room.name}: enter a verified price per container.`);
         return {
           id: room.id, name: room.name, lengthFeet: values.lengthFeet!, widthFeet: values.widthFeet!,
+          surfaceType: room.surfaceType,
           heightFeet: values.heightFeet!, openings: room.openings.map(opening => ({
             kind: opening.kind, widthFeet: numberValue(opening.width) ?? 0,
             heightFeet: numberValue(opening.height) ?? 0, quantity: numberValue(opening.quantity) ?? 1,
@@ -94,6 +100,7 @@ export function EstimateBuilder({ companyId, brands, estimateId: startingId = nu
       return { valid: false as const, result: null, error: error instanceof Error ? error.message : "Estimate is incomplete." };
     }
   }, [rooms, margin]);
+  const activeResult = calculation.result?.rooms.find(result => result.roomId === active.id);
 
   function updateRoom(patch: Partial<RoomDraft>) {
     setRooms(current => current.map((room, index) => index === activeIndex ? { ...room, ...patch } : room));
@@ -203,6 +210,7 @@ export function EstimateBuilder({ companyId, brands, estimateId: startingId = nu
       <div className="flex items-center justify-between gap-4"><div><h2 className="text-xl font-semibold">Room Dimensions</h2><p className="text-sm text-muted">Enter length, width, and wall height to calculate gross wall surface.</p></div><button onClick={() => removeRoom(activeIndex)} className="text-sm font-semibold text-red-700">Remove room</button></div>
       <label className="mt-4 block text-sm font-medium">Room name<input value={active.name} onChange={event => updateRoom({name:event.target.value})} className="mt-1 min-h-11 w-full rounded-lg border border-border px-3"/></label>
       <div className="mt-4 grid gap-4 sm:grid-cols-3">{numeric("Length","length","ft")}{numeric("Width","width","ft")}{numeric("Wall Height","height","ft")}</div>
+      <label className="mt-4 block text-sm font-medium">Surface Type<select required value={active.surfaceType} onChange={event=>updateRoom({surfaceType:event.target.value as SurfaceTypeKey|""})} className="mt-1 min-h-11 w-full rounded-lg border border-border bg-white px-3"><option value="">Select a surface type</option>{SURFACE_TYPES.map(surface=><option key={surface.key} value={surface.key}>{surface.label}</option>)}</select></label>
     </section>
 
     <section className="rounded-xl border border-border bg-surface p-5">
@@ -228,6 +236,13 @@ export function EstimateBuilder({ companyId, brands, estimateId: startingId = nu
     <section className="rounded-xl border border-border bg-surface p-5"><h2 className="text-xl font-semibold">Choose Your Paint</h2>
       <PaintSelector brands={brands} value={active.paint} onChange={paint=>updateRoom({paint,coverage:String(paint.coverageRate)})}/>
       <div className="mt-4 grid gap-4 sm:grid-cols-3">{numeric("Number of Coats","coats")}{numeric("Coverage Rate","coverage","ft²/gal")}{numeric("Container Size","containerSizeGallons","gal")}{numeric("Container Quantity","containerQuantity")}{numeric("Price per Container","pricePerContainerDollars",undefined,"$")}</div>
+      {canManageFinancials && activeResult && <dl className="mt-4 grid gap-3 rounded-lg bg-background p-4 sm:grid-cols-3">
+        <div><dt className="text-xs text-muted">Surface Type</dt><dd className="font-medium">{activeResult.surfaceLabel}</dd></div>
+        <div><dt className="text-xs text-muted">Surface Modifier</dt><dd className="font-mono">{activeResult.surfaceModifier.toFixed(2)}</dd></div>
+        <div><dt className="text-xs text-muted">Effective Coverage Rate</dt><dd className="font-mono">{activeResult.effectiveCoverageRateSqFtPerGallon.toFixed(2)} ft²/gal</dd></div>
+        <div><dt className="text-xs text-muted">Raw Gallons Required</dt><dd className="font-mono">{activeResult.rawGallonsRequired.toFixed(3)} gal</dd></div>
+        <div><dt className="text-xs text-muted">Purchased Paint</dt><dd className="font-mono">{activeResult.purchaseQuantity} × {activeResult.containerSizeGallons} gal</dd></div>
+      </dl>}
       {calculation.result && <p className="mt-4 rounded-lg bg-background p-4 text-sm">Project total: <strong className="font-mono">{formatMoney(calculation.result.totals.customerEstimateCents)}</strong></p>}
     </section>
 

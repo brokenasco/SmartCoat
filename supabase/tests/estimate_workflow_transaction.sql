@@ -10,8 +10,8 @@ create temporary table workflow_ids(estimate_id uuid,company_id uuid,project_id 
 insert into workflow_ids(estimate_id,company_id)
 select public.save_estimate_draft(
   null,m.company_id,'Transactional workflow test',
-  '{"rooms":[{"id":"test-room","name":"Room 1","sortOrder":0,"length":"10","width":"8","height":"8","workers":"2","wageDollars":"25","prepHours":"2","coats":"2","coverage":"400","waste":"10","containerSizeGallons":"1","containerQuantity":"1","pricePerContainerDollars":"50","paint":{"productName":"Verified test paint"},"openings":[],"result":{"grossSurfaceAreaSqFt":288,"deductedOpeningAreaSqFt":0,"netPaintableAreaSqFt":288}}]}'::jsonb,
-  '{"valid":true,"formulaVersion":"5.0.0"}'::jsonb,57542,31648,45
+  '{"rooms":[{"id":"test-room","name":"Room 1","sortOrder":0,"length":"10","width":"8","height":"8","surfaceType":"smooth_previously_painted_drywall","workers":"2","wageDollars":"25","prepHours":"2","coats":"2","coverage":"400","containerSizeGallons":"1","containerQuantity":"1","pricePerContainerDollars":"50","paint":{"productName":"Verified test paint"},"openings":[],"result":{"surfaceType":"smooth_previously_painted_drywall","surfaceModifier":1,"grossSurfaceAreaSqFt":288,"deductedOpeningAreaSqFt":0,"netPaintableAreaSqFt":288}}]}'::jsonb,
+  '{"valid":true,"formulaVersion":"6.0.0"}'::jsonb,57542,31648,45
 ),m.company_id
 from public.company_memberships m where m.user_id=auth.uid() and m.status='active' limit 1;
 select is((select status::text from public.estimates where id=(select estimate_id from workflow_ids)),'draft','draft created');
@@ -30,7 +30,7 @@ select throws_ok(
 );
 insert into workflow_ids(estimate_id,company_id)
 select public.save_estimate_draft(null,m.company_id,'Soft delete workflow test','{"rooms":[]}'::jsonb,
-  '{"valid":false,"formulaVersion":"5.0.0"}'::jsonb,0,0,45),m.company_id
+  '{"valid":false,"formulaVersion":"6.0.0"}'::jsonb,0,0,45),m.company_id
 from public.company_memberships m where m.user_id=auth.uid() and m.status='active' limit 1;
 select lives_ok(
   format('select public.delete_estimate_draft(%L,%L)',(select estimate_id from workflow_ids where project_id is null order by estimate_id desc limit 1),'workflow test'),
