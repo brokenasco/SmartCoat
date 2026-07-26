@@ -1,5 +1,6 @@
 import { calculateEstimate, type EstimateEngineInput, type Opening } from "./estimate-engine";
 import { ESTIMATION_ASSUMPTIONS } from "./estimation-config";
+import type { SurfaceTypeKey } from "./surface-types";
 
 export type RoomEstimateInput = {
   id: string;
@@ -11,6 +12,7 @@ export type RoomEstimateInput = {
   coats: number;
   coverageSqFtPerGallon: number;
   wastePercent: number;
+  surfaceType: SurfaceTypeKey;
   containerSizeGallons: number;
   containerQuantity?: number;
   pricePerContainerCents: number;
@@ -31,6 +33,8 @@ export function calculateMultiRoomEstimate(rooms: RoomEstimateInput[], targetGro
       coats: room.coats,
       coverageSqFtPerGallon: room.coverageSqFtPerGallon,
       wastePercent: ESTIMATION_ASSUMPTIONS.paintWastePercent,
+      surfaceType: room.surfaceType,
+      productModifier: ESTIMATION_ASSUMPTIONS.defaultProductModifier,
       containerSizeGallons: room.containerSizeGallons,
       containerQuantity: room.containerQuantity,
       pricePerContainerCents: room.pricePerContainerCents,

@@ -4,12 +4,13 @@ import { calculateMultiRoomEstimate, type RoomEstimateInput } from "./multi-room
 const room = (overrides: Partial<RoomEstimateInput> = {}): RoomEstimateInput => ({
   id: crypto.randomUUID(), name: "Room 1", lengthFeet: 10, widthFeet: 8, heightFeet: 4.1666667,
   openings: [], coats: 1, coverageSqFtPerGallon: 400, wastePercent: 0,
+  surfaceType: "smooth_previously_painted_drywall",
   containerSizeGallons: 1, pricePerContainerCents: 5000, crewSize: 2,
   averageWageCentsPerHour: 2500, prepPersonHours: 0, retailer: "manual_supplier",
   pricingSource: "manual", pricingTimestamp: "2026-07-25T00:00:00Z", ...overrides,
 });
 
-describe("formula v5 multi-room estimates", () => {
+describe("formula v6 multi-room estimates", () => {
   it("applies protected material waste once without increasing labor", () => {
     const result=calculateMultiRoomEstimate([room({
       lengthFeet:15,widthFeet:12,heightFeet:8,coats:1,

@@ -5,6 +5,7 @@ const base: EstimateEngineInput = {
   room:{lengthFeet:15,widthFeet:12,heightFeet:8},
   openings:[{kind:"window",widthFeet:3,heightFeet:4},{kind:"window",widthFeet:4,heightFeet:5}],
   coats:2,coverageSqFtPerGallon:400,wastePercent:10,
+  surfaceType:"smooth_previously_painted_drywall",
   containerSizeGallons:1,pricePerContainerCents:4798,
   productionRateSqFtPerHour:150,prepHours:2,crewSize:2,
   averageWageCentsPerHour:2500,laborBurdenPercent:20,overheadPercent:10,
@@ -12,10 +13,10 @@ const base: EstimateEngineInput = {
   projectPostalCode:"33601",pricingSource:"manual",pricingTimestamp:"2026-07-25T00:00:00.000Z",
 };
 
-describe("central estimate engine v5", () => {
+describe("central estimate engine v6", () => {
   it("calculates container purchases and true gross margin", () => {
     const result=calculateEstimate(base);
-    expect(result.formulaVersion).toBe("5.0.0");
+    expect(result.formulaVersion).toBe("6.0.0");
     expect(result.grossSurfaceAreaSqFt).toBe(432);
     expect(result.netPaintableAreaSqFt).toBe(400);
     expect(result.rawGallonsRequired).toBe(2.2);

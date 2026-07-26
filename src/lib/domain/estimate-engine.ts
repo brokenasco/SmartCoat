@@ -1,6 +1,8 @@
 import Decimal from "decimal.js";
+import { calculatePaintGallons } from "./paint-materials";
+import type { SurfaceTypeKey } from "./surface-types";
 
-export const ESTIMATE_FORMULA_VERSION = "5.0.0";
+export const ESTIMATE_FORMULA_VERSION = "6.0.0";
 export type Retailer = "home_depot" | "lowes" | "manual_supplier";
 export type Opening = {
   widthFeet: number;
@@ -16,6 +18,9 @@ export type EstimateEngineInput = {
   primerCoats?: number;
   coverageSqFtPerGallon: number;
   wastePercent: number;
+  surfaceType?: SurfaceTypeKey | null;
+  productModifier?: number;
+  legacySurfaceFallback?: boolean;
   containerSizesGallons?: number[];
   /** Compatibility input for v2 snapshots. New estimates use pricePerContainerCents. */
   paintPricePerGallonCents?: number;
@@ -69,8 +74,17 @@ export function calculateEstimate(input: EstimateEngineInput) {
   if (openingArea.gt(grossSurfaceArea)) warnings.push("Opening area exceeds gross wall area; net area was limited to zero.");
   const netPaintableArea = Decimal.max(0, grossSurfaceArea.minus(openingArea));
   const totalCoats = new Decimal(input.coats).plus(input.primerCoats ?? 0);
-  const adjustedCoverageRequirement = netPaintableArea.mul(totalCoats).mul(new Decimal(1).plus(new Decimal(input.wastePercent).div(100)));
-  const rawGallonsRequired = adjustedCoverageRequirement.div(input.coverageSqFtPerGallon);
+  const materialCoverage = calculatePaintGallons({
+    netPaintableArea: netPaintableArea.toNumber(),
+    numberOfCoats: totalCoats.toNumber(),
+    productCoverageRate: input.coverageSqFtPerGallon,
+    surfaceType: input.surfaceType,
+    productModifier: input.productModifier,
+    wasteAllowancePercent: input.wastePercent,
+    legacySurfaceFallback: input.legacySurfaceFallback,
+  });
+  const adjustedCoverageRequirement = new Decimal(materialCoverage.coatAdjustedArea).div(materialCoverage.wasteFactor);
+  const rawGallonsRequired = new Decimal(materialCoverage.rawGallonsRequired);
   const sizes = (input.containerSizesGallons?.length ? input.containerSizesGallons : [5, 1, 0.25]).filter(size => size > 0).sort((a,b)=>b-a);
   const smallest = sizes.at(-1) ?? 1;
   const containerSizeGallons = input.containerSizeGallons ?? smallest;
@@ -116,6 +130,13 @@ export function calculateEstimate(input: EstimateEngineInput) {
     deductedOpeningAreaSqFt: openingArea.toDecimalPlaces(2).toNumber(),
     netPaintableAreaSqFt: netPaintableArea.toDecimalPlaces(2).toNumber(),
     adjustedCoverageSqFt: adjustedCoverageRequirement.toDecimalPlaces(2).toNumber(),
+    coatAdjustedAreaSqFt: new Decimal(materialCoverage.coatAdjustedArea).toDecimalPlaces(2).toNumber(),
+    surfaceType: materialCoverage.surfaceType,
+    surfaceLabel: materialCoverage.surfaceLabel,
+    surfaceModifier: materialCoverage.surfaceModifier,
+    productModifier: materialCoverage.productModifier,
+    wasteFactor: new Decimal(materialCoverage.wasteFactor).toDecimalPlaces(6).toNumber(),
+    effectiveCoverageRateSqFtPerGallon: new Decimal(materialCoverage.effectiveCoverageRate).toDecimalPlaces(3).toNumber(),
     rawGallonsRequired: rawGallonsRequired.toDecimalPlaces(3).toNumber(),
     recommendedGallons: recommendedGallons.toNumber(), containers,
     containerSizeGallons,

@@ -38,6 +38,7 @@ export function ProductTour({ settingsMode=false }: { settingsMode?: boolean }) 
         {kind:"window",widthFeet:values[5]!,heightFeet:values[6]!},
       ],
       coats:form.coats,coverageSqFtPerGallon:form.coverage,wastePercent:form.waste,
+      surfaceType:"smooth_previously_painted_drywall",
       containerSizeGallons:1,pricePerContainerCents:4798,
       productionRateSqFtPerHour:150,prepHours:2,crewSize:values[7]!,
       averageWageCentsPerHour:Math.round(values[8]!*100),laborBurdenPercent:20,
