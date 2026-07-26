@@ -1,6 +1,6 @@
 begin;
 set local search_path = public, extensions;
-select plan(22);
+select plan(31);
 select has_table('public','estimate_approval_snapshots','approval snapshots exist');
 select has_table('public','estimate_status_history','status history exists');
 select has_table('public','room_openings','normalized room openings exist');
@@ -18,6 +18,15 @@ select policy_cmd_is('public','audit_logs','audit_logs_insert_authorized','INSER
 select has_function('public','delete_estimate_draft',array['uuid','text'],'manager draft deletion RPC exists');
 select has_table('public','estimate_progress','estimate progress exists');
 select has_table('public','room_progress','room progress exists');
+select has_table('public','company_estimate_settings','company estimate settings exist');
+select has_column('public','company_estimate_settings','average_hourly_pay_cents','average pay uses integer cents');
+select has_column('public','company_estimate_settings','project_overhead_percent','company overhead default is persisted');
+select col_default_is('public','company_estimate_settings','project_overhead_percent','15','company overhead defaults to 15 percent');
+select has_column('public','room_progress','is_completed','room completion is persisted');
+select has_column('public','room_progress','completed_at','room completion timestamp is persisted');
+select has_column('public','room_progress','completed_by','room completion actor is persisted');
+select has_function('public','set_room_completion_status',array['uuid','boolean'],'narrow room completion RPC exists');
+select has_function('public','update_company_estimate_settings',array['uuid','bigint','numeric'],'manager settings RPC exists');
 select has_table('public','retailer_data_sources','retailer sources exist');
 select has_table('public','retailer_import_jobs','retailer jobs exist');
 select has_index('public','estimates','estimates_company_status_updated_idx','draft/approved list index exists');

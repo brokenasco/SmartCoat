@@ -24,9 +24,9 @@ type RoomDraft = {
 };
 type DraftPayload = { rooms: RoomDraft[]; targetGrossMarginPercent?: number };
 
-const roomDraft = (position: number, inherit?: RoomDraft): RoomDraft => ({
+const roomDraft = (position: number, inherit?: RoomDraft, defaultWageDollars = "25.00"): RoomDraft => ({
   id: crypto.randomUUID(), name: `Room ${position}`, length: "", width: "", height: "", surfaceType: "",
-  workers: inherit?.workers ?? "2", wageDollars: inherit?.wageDollars ?? "25.00",
+  workers: inherit?.workers ?? "2", wageDollars: inherit?.wageDollars ?? defaultWageDollars,
   prepHours: inherit?.prepHours ?? "2", coats: "2",
   containerSizeGallons: "1", pricePerContainerDollars: "",
   openings: [], paintBrand: "", paintColorCode: "",
@@ -35,7 +35,7 @@ const numberValue = (raw: string) => {
   const parsed = parseNumericInput(raw);
   return parsed.state === "valid" ? parsed.value : null;
 };
-function calculateDraft(rooms: RoomDraft[], margin: string) {
+function calculateDraft(rooms: RoomDraft[], margin: string, overheadPercent: number) {
   try {
     const targetMargin = numberValue(margin);
     if (targetMargin === null) throw new Error("Enter a valid target gross margin.");
@@ -66,7 +66,7 @@ function calculateDraft(rooms: RoomDraft[], margin: string) {
         retailer: "manual_supplier" as const, pricingSource: "manual" as const, pricingTimestamp: new Date().toISOString(),
       };
     });
-    return { valid: true as const, result: calculateMultiRoomEstimate(inputs, targetMargin), error: "" };
+    return { valid: true as const, result: calculateMultiRoomEstimate(inputs, targetMargin, overheadPercent), error: "" };
   } catch (error) {
     return { valid: false as const, result: null, error: error instanceof Error ? error.message : "Estimate is incomplete." };
   }
@@ -104,12 +104,14 @@ export function friendlyEstimateError(error: { code?: string; message?: string }
     : "We could not approve this estimate. Please try again.";
 }
 
-export function EstimateBuilder({ companyId, estimateId: startingId = null, initialTitle = "", initialMargin, initialPayload, canManageFinancials = true }: {
+export function EstimateBuilder({ companyId, estimateId: startingId = null, initialTitle = "", initialMargin, initialPayload, initialAverageHourlyPayCents = 2500, initialOverheadPercent = ESTIMATION_ASSUMPTIONS.overheadPercent, canManageFinancials = true }: {
   companyId: string;
   estimateId?: string | null;
   initialTitle?: string;
   initialMargin?: number;
   initialPayload?: DraftPayload | null;
+  initialAverageHourlyPayCents?: number;
+  initialOverheadPercent?: number;
   canManageFinancials?: boolean;
 }) {
   const router = useRouter();
@@ -122,7 +124,7 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
       paintBrand: room.paintBrand || room.paint?.brandName || "",
       paintColorCode: room.paintColorCode || room.paint?.colorCode || "",
     }))
-    : [roomDraft(1)]));
+    : [roomDraft(1, undefined, (initialAverageHourlyPayCents / 100).toFixed(2))]));
   const [activeIndex, setActiveIndex] = useState(0);
   const [margin, setMargin] = useState(String(initialMargin ?? initialPayload?.targetGrossMarginPercent ?? ESTIMATION_ASSUMPTIONS.defaultGrossMarginPercent));
   const [status, setStatus] = useState("");
@@ -131,7 +133,7 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
   const roomAddPending = useRef(false);
   const active = rooms[activeIndex];
 
-  const calculation = useMemo(() => calculateDraft(rooms, margin), [rooms, margin]);
+  const calculation = useMemo(() => calculateDraft(rooms, margin, initialOverheadPercent), [rooms, margin, initialOverheadPercent]);
   const activeResult = calculation.result?.rooms.find(result => result.roomId === active.id);
 
   function updateRoom(patch: Partial<RoomDraft>) {
@@ -175,7 +177,7 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
     if (saving) return;
     setSaving(true); setStatus("Saving draft…");
     const synchronizedRooms = synchronizeRoomLabor(roomsToSave);
-    const savedCalculation = calculateDraft(synchronizedRooms, margin);
+    const savedCalculation = calculateDraft(synchronizedRooms, margin, initialOverheadPercent);
     const payload = {
       targetGrossMarginPercent: numberValue(margin) ?? ESTIMATION_ASSUMPTIONS.defaultGrossMarginPercent,
       rooms: synchronizedRooms.map((room, sortOrder) => ({
@@ -311,7 +313,7 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
     </section>
 
     <section className="rounded-xl bg-[#16251d] p-5 text-white">
-      <p className="text-sm text-emerald-100/70">Formula {ESTIMATION_ASSUMPTIONS.formulaVersion}. Company production, burden, and overhead assumptions are protected and automatically snapshotted.</p>
+      <p className="text-sm text-emerald-100/70">Formula {ESTIMATION_ASSUMPTIONS.formulaVersion}. This estimate snapshots {initialOverheadPercent}% project overhead and its saved labor assumptions.</p>
       {canManageFinancials && <label className="mt-4 block font-medium" htmlFor="target-margin">Target Gross Margin <strong className="float-right">{margin}%</strong><input id="target-margin" aria-valuetext={`${margin} percent target gross margin`} type="range" min="0" max={ESTIMATION_ASSUMPTIONS.maximumGrossMarginPercent} step="1" value={margin} onChange={event=>setMargin(event.target.value)} className="mt-4 w-full accent-emerald-400"/></label>}
       {!calculation.valid && <p role="alert" className="mt-3 rounded-lg bg-amber-100 p-3 text-sm text-amber-950">{calculation.error}</p>}
       <div className="mt-5 grid gap-3 sm:grid-cols-2">

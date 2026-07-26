@@ -12,8 +12,11 @@ export default async function NewEstimate() {
   if (!membership) redirect("/dashboard");
   const { hasPremiumAccess } = await getCompanyEntitlement(supabase, membership.company_id);
   if (!hasPremiumAccess) redirect("/dashboard");
+  const { data: settings } = await supabase.from("company_estimate_settings")
+    .select("average_hourly_pay_cents,project_overhead_percent")
+    .eq("company_id",membership.company_id).maybeSingle();
   return <main className="min-h-screen">
     <header className="border-b border-border bg-surface"><div className="mx-auto max-w-7xl px-5 py-4"><Link href="/dashboard" className="text-sm font-semibold text-brand">← Dashboard</Link></div></header>
-    <div className="mx-auto max-w-7xl px-5 py-8"><p className="text-sm text-muted">Draft estimate</p><h1 className="mb-7 text-3xl font-semibold">Build a room estimate</h1><EstimateBuilder companyId={membership.company_id} canManageFinancials={["owner","admin","manager"].includes(membership.role)}/></div>
+    <div className="mx-auto max-w-7xl px-5 py-8"><p className="text-sm text-muted">Draft estimate</p><h1 className="mb-7 text-3xl font-semibold">Build a room estimate</h1><EstimateBuilder companyId={membership.company_id} initialAverageHourlyPayCents={settings?.average_hourly_pay_cents??2500} initialOverheadPercent={Number(settings?.project_overhead_percent??15)} canManageFinancials={["owner","admin","manager"].includes(membership.role)}/></div>
   </main>;
 }

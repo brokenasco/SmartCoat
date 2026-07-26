@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { formatMoney } from "@/lib/domain/pricing";
+import { EstimateNavigation } from "@/components/estimate-navigation";
 
 export const dynamic = "force-dynamic";
 const PAGE_SIZE = 20;
@@ -14,14 +15,14 @@ export default async function EstimatesPage({ searchParams }: { searchParams: Pr
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
-  const { data: membership } = await supabase.from("company_memberships").select("company_id").eq("user_id",user.id).eq("status","active").limit(1).single();
+  const { data: membership } = await supabase.from("company_memberships").select("company_id,role").eq("user_id",user.id).eq("status","active").limit(1).single();
   if (!membership) redirect("/dashboard");
   const counts = await Promise.all([
     supabase.from("estimates").select("id",{count:"exact",head:true}).eq("company_id",membership.company_id).eq("status","draft").is("deleted_at",null),
     supabase.from("estimates").select("id",{count:"exact",head:true}).eq("company_id",membership.company_id).eq("status","approved").is("deleted_at",null),
   ]);
   let query = supabase.from("estimates")
-    .select("id,estimate_number,title,status,total_cents,created_at,updated_at,approved_at,draft_payload,properties(address_line_1,city,postal_code),customers(name)",{count:"exact"})
+    .select("id,estimate_number,title,status,total_cents,created_at,updated_at,approved_at,draft_payload,estimate_progress(completion_percent),properties(address_line_1,city,postal_code),customers(name)",{count:"exact"})
     .eq("company_id",membership.company_id).eq("status",tab).is("deleted_at",null)
     .order(tab==="draft" ? "updated_at" : "approved_at",{ascending:false})
     .range((page-1)*PAGE_SIZE,page*PAGE_SIZE-1);
@@ -31,15 +32,15 @@ export default async function EstimatesPage({ searchParams }: { searchParams: Pr
     <header className="border-b border-border bg-surface"><div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4"><Link href="/dashboard" className="font-semibold text-brand">← Dashboard</Link><Link href="/dashboard/estimates/new" className="rounded-lg bg-brand px-4 py-3 font-semibold text-white">New estimate</Link></div></header>
     <div className="mx-auto max-w-7xl px-5 py-8">
       <h1 className="text-3xl font-semibold">Estimates</h1>
-      <nav className="mt-6 flex gap-2" aria-label="Estimate status"><Tab href="/dashboard/estimates?tab=draft" active={tab==="draft"}>Drafts ({counts[0].count??0})</Tab><Tab href="/dashboard/estimates?tab=approved" active={tab==="approved"}>Approved ({counts[1].count??0})</Tab></nav>
+      <EstimateNavigation active={tab} canManage={["owner","admin","manager"].includes(membership.role)} draftCount={counts[0].count??0} approvedCount={counts[1].count??0}/>
       <form className="mt-5 flex gap-2"><input type="hidden" name="tab" value={tab}/><label className="sr-only" htmlFor="estimate-search">Search estimates</label><input id="estimate-search" name="q" defaultValue={q} placeholder="Search name or estimate number" className="min-h-11 flex-1 rounded-lg border border-border px-3"/><button className="rounded-lg border border-brand px-4 font-semibold text-brand">Search</button></form>
       {!estimates?.length ? <section className="mt-6 rounded-xl border border-border bg-surface p-10 text-center"><h2 className="font-semibold">{tab==="draft" ? "You do not have any draft estimates." : "No estimates have been approved yet."}</h2><p className="mt-2 text-sm text-muted">{tab==="draft" ? "Start a new estimate to begin building a project quote." : "Completed drafts will appear here after approval."}</p></section> :
       <section className="mt-6 divide-y divide-border rounded-xl border border-border bg-surface">{estimates.map(estimate=>{
         const payload=estimate.draft_payload as {rooms?:unknown[]}|null; const customer=Array.isArray(estimate.customers)?estimate.customers[0]:estimate.customers; const property=Array.isArray(estimate.properties)?estimate.properties[0]:estimate.properties;
-        return <article key={estimate.id} className="grid gap-4 p-5 md:grid-cols-[1fr_auto]"><div><p className="text-xs uppercase text-muted">Estimate #{estimate.estimate_number} · {estimate.status}</p><h2 className="mt-1 text-lg font-semibold">{estimate.title}</h2><p className="text-sm text-muted">{customer?.name??"No customer selected"}{property?` · ${property.address_line_1}, ${property.city} ${property.postal_code}`:""}</p><p className="mt-2 text-xs text-muted">{payload?.rooms?.length??0} rooms · Updated {new Date(estimate.updated_at).toLocaleString()}</p></div><div className="flex items-center gap-4"><strong className="font-mono">{formatMoney(estimate.total_cents)}</strong><Link href={tab==="draft"?`/dashboard/estimates/${estimate.id}/edit`:`/dashboard/estimates/${estimate.id}`} className="rounded-lg bg-brand px-4 py-3 font-semibold text-white">{tab==="draft"?"Open and Edit":"View Approved"}</Link></div></article>;
+        const estimateProgress=Array.isArray(estimate.estimate_progress)?estimate.estimate_progress[0]:estimate.estimate_progress;
+        return <article key={estimate.id} className="grid gap-4 p-5 md:grid-cols-[1fr_auto]"><div><p className="text-xs uppercase text-muted">Estimate #{estimate.estimate_number} · {estimate.status}</p><h2 className="mt-1 text-lg font-semibold">{estimate.title}</h2><p className="text-sm text-muted">{customer?.name??"No customer selected"}{property?` · ${property.address_line_1}, ${property.city} ${property.postal_code}`:""}</p><p className="mt-2 text-xs text-muted">{payload?.rooms?.length??0} rooms · Updated {new Date(estimate.updated_at).toLocaleString()}</p>{tab==="approved"&&<div className="mt-3 flex items-center gap-3"><div className="h-2 w-36 overflow-hidden rounded-full bg-slate-200" role="progressbar" aria-label="Project completion" aria-valuemin={0} aria-valuemax={100} aria-valuenow={estimateProgress?.completion_percent??0}><div className="h-full bg-brand" style={{width:`${estimateProgress?.completion_percent??0}%`}}/></div><span className="font-mono text-sm">{estimateProgress?.completion_percent??0}%</span></div>}</div><div className="flex items-center gap-4"><strong className="font-mono">{formatMoney(estimate.total_cents)}</strong><Link href={tab==="draft"?`/dashboard/estimates/${estimate.id}/edit`:`/dashboard/estimates/${estimate.id}`} className="rounded-lg bg-brand px-4 py-3 font-semibold text-white">{tab==="draft"?"Open and Edit":"View Approved"}</Link></div></article>;
       })}</section>}
       {(count??0)>PAGE_SIZE && <nav className="mt-5 flex justify-between"><Link aria-disabled={page===1} href={`?tab=${tab}&q=${encodeURIComponent(q)}&page=${Math.max(1,page-1)}`}>Previous</Link><span>Page {page}</span><Link href={`?tab=${tab}&q=${encodeURIComponent(q)}&page=${page+1}`}>Next</Link></nav>}
     </div>
   </main>;
 }
-function Tab({href,active,children}:{href:string;active:boolean;children:React.ReactNode}){return <Link href={href} aria-current={active?"page":undefined} className={`rounded-lg px-4 py-3 font-semibold ${active?"bg-brand text-white":"border border-border bg-surface"}`}>{children}</Link>}

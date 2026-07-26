@@ -43,4 +43,9 @@ describe("project-level estimate pricing",()=>{
     expect(result.finalCustomerEstimateCents).toBe(191667);
     expect(result.expectedGrossProfitCents).toBe(76667);
   });
+  it("uses the company overhead snapshot instead of a hard-coded percentage",()=>{
+    const base={rooms:[{roomId:"room",directCostCents:100000}],targetGrossMarginPercent:0};
+    expect(calculateProjectEstimate({...base,overheadPercent:15}).overheadCents).toBe(15000);
+    expect(calculateProjectEstimate({...base,overheadPercent:18}).overheadCents).toBe(18000);
+  });
 });
