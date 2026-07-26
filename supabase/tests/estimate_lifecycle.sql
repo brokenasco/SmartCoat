@@ -1,6 +1,6 @@
 begin;
 set local search_path = public, extensions;
-select plan(15);
+select plan(20);
 select has_table('public','estimate_approval_snapshots','approval snapshots exist');
 select has_table('public','estimate_status_history','status history exists');
 select has_table('public','room_openings','normalized room openings exist');
@@ -8,6 +8,11 @@ select has_column('public','room_openings','subtract_from_paintable_area','openi
 select has_column('public','estimates','deleted_at','draft soft deletion is available');
 select has_column('public','estimate_rooms','surface_type','rooms store a stable surface type key');
 select has_column('public','estimate_rooms','surface_modifier_snapshot','rooms snapshot the approved surface modifier');
+select has_column('public','estimates','number_of_workers','estimates snapshot shared worker count');
+select has_column('public','estimates','average_hourly_wage_cents','estimates snapshot shared hourly wage');
+select has_column('public','estimates','prep_person_hours_per_room','estimates snapshot prep person-hours per room');
+select has_index('public','estimate_status_history','estimate_status_history_estimate_changed_idx','history lookup is indexed');
+select policies_are('public','estimate_status_history',array['estimate_history_insert','estimate_history_read'],'history has only scoped read and insert policies');
 select has_function('public','delete_estimate_draft',array['uuid','text'],'manager draft deletion RPC exists');
 select has_table('public','estimate_progress','estimate progress exists');
 select has_table('public','room_progress','room progress exists');

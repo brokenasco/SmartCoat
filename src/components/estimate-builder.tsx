@@ -7,6 +7,7 @@ import { calculateMultiRoomEstimate, type RoomEstimateInput } from "@/lib/domain
 import { ESTIMATION_ASSUMPTIONS } from "@/lib/domain/estimation-config";
 import { parseNumericInput } from "@/lib/domain/numeric-input";
 import { formatMoney } from "@/lib/domain/pricing";
+import { sharedLaborFromFirstRoom, synchronizeRoomLabor, updateSharedLabor, type SharedLaborFields } from "@/lib/domain/shared-labor";
 import { createClient } from "@/lib/supabase/browser";
 import { LEGACY_SURFACE_TYPE, SURFACE_TYPES, type SurfaceTypeKey } from "@/lib/domain/surface-types";
 
@@ -71,6 +72,25 @@ function calculateDraft(rooms: RoomDraft[], margin: string) {
   }
 }
 
+function friendlyEstimateError(error: { code?: string; message?: string }, operation: "draft" | "approval") {
+  const message = error.message?.toLowerCase() ?? "";
+  if (error.code === "42501" || message.includes("permission") || message.includes("authorized")) {
+    return "You do not have permission to update this estimate.";
+  }
+  if (message.includes("active draft") || message.includes("locked") || message.includes("updated elsewhere")) {
+    return "This estimate was updated elsewhere. Refresh the page and try again.";
+  }
+  if (operation === "approval" && (
+    message.includes("required") || message.includes("valid") || message.includes("incomplete")
+    || message.includes("stale")
+  )) {
+    return "This estimate cannot be approved until all required information is complete.";
+  }
+  return operation === "draft"
+    ? "We could not save this estimate as a draft. Please try again."
+    : "We could not approve this estimate. Please try again.";
+}
+
 export function EstimateBuilder({ companyId, estimateId: startingId = null, initialTitle = "", initialMargin, initialPayload, canManageFinancials = true }: {
   companyId: string;
   estimateId?: string | null;
@@ -82,14 +102,14 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
   const router = useRouter();
   const [estimateId, setEstimateId] = useState(startingId);
   const [title, setTitle] = useState(initialTitle);
-  const [rooms, setRooms] = useState<RoomDraft[]>(initialPayload?.rooms?.length
+  const [rooms, setRooms] = useState<RoomDraft[]>(() => synchronizeRoomLabor(initialPayload?.rooms?.length
     ? initialPayload.rooms.map(room => ({
       ...room,
       surfaceType: room.surfaceType || LEGACY_SURFACE_TYPE,
       paintBrand: room.paintBrand || room.paint?.brandName || "",
       paintColorCode: room.paintColorCode || room.paint?.colorCode || "",
     }))
-    : [roomDraft(1)]);
+    : [roomDraft(1)]));
   const [activeIndex, setActiveIndex] = useState(0);
   const [margin, setMargin] = useState(String(initialMargin ?? initialPayload?.targetGrossMarginPercent ?? ESTIMATION_ASSUMPTIONS.defaultGrossMarginPercent));
   const [status, setStatus] = useState("");
@@ -104,6 +124,9 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
   function updateRoom(patch: Partial<RoomDraft>) {
     setRooms(current => current.map((room, index) => index === activeIndex ? { ...room, ...patch } : room));
   }
+  function updateLabor(patch: Partial<SharedLaborFields>) {
+    setRooms(current => updateSharedLabor(current, patch));
+  }
   function updateOpening(id: string, patch: Partial<OpeningDraft>) {
     updateRoom({ openings: active.openings.map(opening => opening.id === id ? { ...opening, ...patch } : opening) });
   }
@@ -114,7 +137,7 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
     if (roomAddPending.current || addingRoom || saving) return;
     roomAddPending.current = true;
     setAddingRoom(true);
-    const next = roomDraft(rooms.length + 1, active);
+    const next = roomDraft(rooms.length + 1, { ...active, ...sharedLaborFromFirstRoom(rooms) });
     const nextRooms = [...rooms, next];
     setRooms(nextRooms);
     setActiveIndex(nextRooms.length - 1);
@@ -138,10 +161,11 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
   async function saveDraft(roomsToSave: RoomDraft[] = rooms) {
     if (saving) return;
     setSaving(true); setStatus("Saving draft…");
-    const savedCalculation = calculateDraft(roomsToSave, margin);
+    const synchronizedRooms = synchronizeRoomLabor(roomsToSave);
+    const savedCalculation = calculateDraft(synchronizedRooms, margin);
     const payload = {
       targetGrossMarginPercent: numberValue(margin) ?? ESTIMATION_ASSUMPTIONS.defaultGrossMarginPercent,
-      rooms: roomsToSave.map((room, sortOrder) => ({
+      rooms: synchronizedRooms.map((room, sortOrder) => ({
         ...room,
         paintBrand: room.paintBrand.trim(),
         paintColorCode: room.paintColorCode.trim(),
@@ -163,8 +187,9 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
     });
     setSaving(false);
     if (error) {
-      console.error("estimate_draft_save_failed", { code: error.code });
-      return setStatus(error.message);
+      console.error("estimate_draft_save_failed", { code: error.code, message: error.message });
+      setStatus(friendlyEstimateError(error, "draft"));
+      return;
     }
     setEstimateId(data);
     setStatus("Draft saved.");
@@ -174,15 +199,18 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
   }
 
   async function approve() {
-    if (!calculation.valid) return setStatus(calculation.error);
-    const id = estimateId ?? await saveDraft();
+    if (!calculation.valid) return setStatus("This estimate cannot be approved until all required information is complete.");
+    const id = await saveDraft();
     if (!id) return;
     const confirmed = window.confirm("Approving this estimate will lock dimensions, paint selections, labor assumptions, material costs, and customer price. Future scope changes require a revision or change order.");
     if (!confirmed) return;
+    setSaving(true);
+    setStatus("Approving estimate…");
     const { error } = await createClient().rpc("approve_estimate", { target_estimate: id });
+    setSaving(false);
     if (error) {
-      console.error("estimate_approval_failed", { code: error.code });
-      return setStatus(error.message);
+      console.error("estimate_approval_failed", { code: error.code, message: error.message });
+      return setStatus(friendlyEstimateError(error, "approval"));
     }
     router.replace(`/dashboard/estimates/${id}`);
     router.refresh();
@@ -207,10 +235,20 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
 
   const numeric = (label: string, key: keyof RoomDraft, suffix?: string, prefix?: string) =>
     <NumericInput label={label} value={String(active[key])} onChange={value => updateRoom({ [key]: value })} suffix={suffix} prefix={prefix}/>;
+  const labor = sharedLaborFromFirstRoom(rooms);
 
   return <div className="space-y-6">
     <section className="rounded-xl border border-border bg-surface p-5">
       <label className="block text-sm font-medium">Estimate name<input value={title} onChange={event => setTitle(event.target.value)} placeholder="Untitled draft" className="mt-1 min-h-11 w-full rounded-lg border border-border px-3"/></label>
+      <div className="mt-5 border-t border-border pt-5">
+        <h2 className="text-xl font-semibold">Labor Setup</h2>
+        <p className="mt-1 text-sm text-muted">These labor settings apply to every room in this estimate.</p>
+        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+          <NumericInput label="Number of Workers" value={labor.workers} onChange={value=>updateLabor({workers:value})}/>
+          <NumericInput label="Average Hourly Wage" value={labor.wageDollars} prefix="$" onChange={value=>updateLabor({wageDollars:value})}/>
+          <NumericInput label="Prep Person-Hours per Room" value={labor.prepHours} suffix="person-hr" onChange={value=>updateLabor({prepHours:value})}/>
+        </div>
+      </div>
       <button type="button" onClick={addRoom} disabled={addingRoom || saving} className="mt-3 min-h-11 rounded-lg border border-brand px-4 font-semibold text-brand disabled:opacity-50">{addingRoom ? "Adding room…" : "Add Room"}</button>
       <nav aria-label="Estimate rooms" className="mt-5 flex flex-wrap gap-2">{rooms.map((room,index) =>
         <button key={room.id} onClick={() => setActiveIndex(index)} aria-current={index===activeIndex ? "page" : undefined} className={`min-h-11 rounded-lg border px-4 text-sm font-semibold ${index===activeIndex ? "border-brand bg-brand text-white" : "border-border"}`}>{room.name}</button>)}</nav>
@@ -236,11 +274,6 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
         <button onClick={()=>updateRoom({openings:active.openings.filter(item=>item.id!==opening.id)})} className="self-end min-h-11 text-sm font-semibold text-red-700">Remove Opening</button>
       </div>)}</div>
       <button type="button" onClick={addOpening} className="mt-4 min-h-11 rounded-lg border border-brand px-4 font-semibold text-brand">Add Opening</button>
-    </section>
-
-    <section className="rounded-xl border border-border bg-surface p-5"><h2 className="text-xl font-semibold">Labor Setup</h2>
-      <div className="mt-4 grid gap-4 sm:grid-cols-3">{numeric("Number of Workers","workers")}{numeric("Average Hourly Wage","wageDollars",undefined,"$")}{numeric("Prep Hours","prepHours","person-hr")}</div>
-      <p className="mt-2 text-xs text-muted">Enter the total estimated person-hours required for preparation.</p>
     </section>
 
     <section className="rounded-xl border border-border bg-surface p-5"><h2 className="text-xl font-semibold">Choose Your Paint</h2>
