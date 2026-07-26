@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculatePaintGallons } from "./paint-materials";
+import { calculatePaintGallons, optimizePaintContainers } from "./paint-materials";
 import { LEGACY_SURFACE_TYPE, SURFACE_TYPES } from "./surface-types";
 
 const base = {
@@ -55,5 +55,18 @@ describe("surface-adjusted paint material coverage", () => {
   it("does not double-count the waste allowance", () => {
     const result=calculatePaintGallons({...base,surfaceType:"smooth_previously_painted_drywall"});
     expect(result.rawGallonsRequired).toBeCloseTo((2000*1.15)/375,10);
+  });
+  it("rounds fractional one-gallon requirements upward without overbuying exact gallons", () => {
+    expect(optimizePaintContainers(6.01,[{containerSizeGallons:1,unitPriceCents:5000}])[0].quantity).toBe(7);
+    expect(optimizePaintContainers(6,[{containerSizeGallons:1,unitPriceCents:5000}])[0].quantity).toBe(6);
+  });
+  it("chooses the lowest-cost deterministic multi-container purchase", () => {
+    expect(optimizePaintContainers(6.14,[
+      {containerSizeGallons:5,unitPriceCents:18000},
+      {containerSizeGallons:1,unitPriceCents:5000},
+    ])).toEqual([
+      {containerSizeGallons:5,unitPriceCents:18000,quantity:1,extendedPriceCents:18000},
+      {containerSizeGallons:1,unitPriceCents:5000,quantity:2,extendedPriceCents:10000},
+    ]);
   });
 });

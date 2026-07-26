@@ -14,7 +14,6 @@ export type RoomEstimateInput = {
   wastePercent: number;
   surfaceType: SurfaceTypeKey;
   containerSizeGallons: number;
-  containerQuantity?: number;
   pricePerContainerCents: number;
   crewSize: number;
   averageWageCentsPerHour: number;
@@ -24,7 +23,11 @@ export type RoomEstimateInput = {
   pricingTimestamp: string;
 };
 
-export function calculateMultiRoomEstimate(rooms: RoomEstimateInput[], targetGrossMarginPercent: number) {
+export function calculateMultiRoomEstimate(
+  rooms: RoomEstimateInput[],
+  targetGrossMarginPercent: number,
+  projectLevelDirectMaterialsCents = 0,
+) {
   if (!rooms.length) throw new RangeError("At least one room is required.");
   const results = rooms.map(room => {
     const result = calculateEstimate({
@@ -36,7 +39,6 @@ export function calculateMultiRoomEstimate(rooms: RoomEstimateInput[], targetGro
       surfaceType: room.surfaceType,
       productModifier: ESTIMATION_ASSUMPTIONS.defaultProductModifier,
       containerSizeGallons: room.containerSizeGallons,
-      containerQuantity: room.containerQuantity,
       pricePerContainerCents: room.pricePerContainerCents,
       productionRateSqFtPerHour: ESTIMATION_ASSUMPTIONS.productionRateSqFtPerPersonHour,
       prepHours: room.prepPersonHours,
@@ -58,6 +60,7 @@ export function calculateMultiRoomEstimate(rooms: RoomEstimateInput[], targetGro
   const sum = (field: keyof typeof results[number]) => results.reduce((total, result) => total + (typeof result[field] === "number" ? result[field] as number : 0), 0);
   const project = calculateProjectEstimate({
     rooms: results.map(result=>({roomId:result.roomId,directCostCents:result.directCostCents})),
+    projectLevelDirectMaterialsCents,
     overheadPercent: ESTIMATION_ASSUMPTIONS.overheadPercent,
     targetGrossMarginPercent,
   });
@@ -74,7 +77,8 @@ export function calculateMultiRoomEstimate(rooms: RoomEstimateInput[], targetGro
       paintCostCents: sum("paintCostCents"),
       laborPersonHours: sum("laborHours"),
       loadedLaborCostCents: sum("totalLaborCostCents"),
-      directCostCents: project.roomDirectCostTotalCents,
+      otherDirectMaterialsCents: project.projectLevelDirectMaterialsCents,
+      directCostCents: project.adjustedProjectDirectCostCents,
       overheadCents: project.overheadCents,
       contractorCostCents: project.totalInternalCostCents,
       customerEstimateCents: project.finalCustomerEstimateCents,

@@ -3,10 +3,10 @@
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { NumericInput } from "@/components/numeric-input";
+import { EstimateSummary } from "@/components/estimate-summary";
 import { calculateMultiRoomEstimate, type RoomEstimateInput } from "@/lib/domain/multi-room-estimate";
 import { ESTIMATION_ASSUMPTIONS } from "@/lib/domain/estimation-config";
 import { parseNumericInput } from "@/lib/domain/numeric-input";
-import { formatMoney } from "@/lib/domain/pricing";
 import { sharedLaborFromFirstRoom, synchronizeRoomLabor, updateSharedLabor, type SharedLaborFields } from "@/lib/domain/shared-labor";
 import { createClient } from "@/lib/supabase/browser";
 import { LEGACY_SURFACE_TYPE, SURFACE_TYPES, type SurfaceTypeKey } from "@/lib/domain/surface-types";
@@ -18,24 +18,24 @@ type RoomDraft = {
   surfaceType: SurfaceTypeKey | "";
   workers: string; wageDollars: string; prepHours: string; coats: string;
   containerSizeGallons: string;
-  containerQuantity: string; pricePerContainerDollars: string;
+  pricePerContainerDollars: string;
   openings: OpeningDraft[]; paintBrand: string; paintColorCode: string;
   paint?: { brandName?: string | null; colorCode?: string | null };
 };
-type DraftPayload = { rooms: RoomDraft[]; targetGrossMarginPercent?: number };
+type DraftPayload = { rooms: RoomDraft[]; targetGrossMarginPercent?: number; otherDirectMaterialsDollars?: string };
 
 const roomDraft = (position: number, inherit?: RoomDraft): RoomDraft => ({
   id: crypto.randomUUID(), name: `Room ${position}`, length: "", width: "", height: "", surfaceType: "",
   workers: inherit?.workers ?? "2", wageDollars: inherit?.wageDollars ?? "25.00",
   prepHours: inherit?.prepHours ?? "2", coats: "2",
-  containerSizeGallons: "1", containerQuantity: "1", pricePerContainerDollars: "",
+  containerSizeGallons: "1", pricePerContainerDollars: "",
   openings: [], paintBrand: "", paintColorCode: "",
 });
 const numberValue = (raw: string) => {
   const parsed = parseNumericInput(raw);
   return parsed.state === "valid" ? parsed.value : null;
 };
-function calculateDraft(rooms: RoomDraft[], margin: string) {
+function calculateDraft(rooms: RoomDraft[], margin: string, otherDirectMaterials: string) {
   try {
     const targetMargin = numberValue(margin);
     if (targetMargin === null) throw new Error("Enter a valid target gross margin.");
@@ -44,7 +44,7 @@ function calculateDraft(rooms: RoomDraft[], margin: string) {
         lengthFeet: numberValue(room.length), widthFeet: numberValue(room.width), heightFeet: numberValue(room.height),
         crewSize: numberValue(room.workers), wage: numberValue(room.wageDollars), prep: numberValue(room.prepHours),
         coats: numberValue(room.coats), container: numberValue(room.containerSizeGallons),
-        quantity: numberValue(room.containerQuantity), price: numberValue(room.pricePerContainerDollars),
+        price: numberValue(room.pricePerContainerDollars),
       };
       if (Object.values(values).some(value => value === null)) throw new Error(`${room.name}: complete required measurements, labor, and paint pricing.`);
       if (!room.surfaceType) throw new Error(`${room.name}: select a surface type.`);
@@ -60,22 +60,33 @@ function calculateDraft(rooms: RoomDraft[], margin: string) {
           subtractFromPaintableArea: opening.subtractFromPaintableArea !== false,
         })),
         coats: values.coats!, wastePercent: ESTIMATION_ASSUMPTIONS.paintWastePercent,
-        containerSizeGallons: values.container!, containerQuantity: values.quantity!,
+        containerSizeGallons: values.container!,
         pricePerContainerCents: Math.round(values.price! * 100), crewSize: values.crewSize!,
         averageWageCentsPerHour: Math.round(values.wage! * 100), prepPersonHours: values.prep!,
         retailer: "manual_supplier" as const, pricingSource: "manual" as const, pricingTimestamp: new Date().toISOString(),
       };
     });
-    return { valid: true as const, result: calculateMultiRoomEstimate(inputs, targetMargin), error: "" };
+    const otherMaterials = numberValue(otherDirectMaterials);
+    if (otherMaterials === null || otherMaterials < 0) throw new Error("Enter valid other direct materials.");
+    return { valid: true as const, result: calculateMultiRoomEstimate(inputs, targetMargin, Math.round(otherMaterials*100)), error: "" };
   } catch (error) {
     return { valid: false as const, result: null, error: error instanceof Error ? error.message : "Estimate is incomplete." };
   }
 }
 
-function friendlyEstimateError(error: { code?: string; message?: string }, operation: "draft" | "approval") {
+export function friendlyEstimateError(error: { code?: string; message?: string }, operation: "draft" | "approval") {
   const message = error.message?.toLowerCase() ?? "";
-  if (error.code === "42501" || message.includes("permission") || message.includes("authorized")) {
+  if (error.code === "PGRST301" || message.includes("jwt") || message.includes("session")) {
+    return "Your session has expired. Sign in again to continue.";
+  }
+  if (error.code === "42501" || message === "not authorized" || message.includes("manager permission required")) {
     return "You do not have permission to update this estimate.";
+  }
+  if (error.code === "PGRST116" || message.includes("not found")) return "This estimate could not be found.";
+  if (error.code === "23503" || error.code === "23505" || error.code === "23514") {
+    return operation === "draft"
+      ? "Complete the required estimate information before saving."
+      : "This estimate cannot be approved until all required information is complete.";
   }
   if (message.includes("active draft") || message.includes("locked") || message.includes("updated elsewhere")) {
     return "This estimate was updated elsewhere. Refresh the page and try again.";
@@ -112,13 +123,14 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
     : [roomDraft(1)]));
   const [activeIndex, setActiveIndex] = useState(0);
   const [margin, setMargin] = useState(String(initialMargin ?? initialPayload?.targetGrossMarginPercent ?? ESTIMATION_ASSUMPTIONS.defaultGrossMarginPercent));
+  const [otherDirectMaterials, setOtherDirectMaterials] = useState(initialPayload?.otherDirectMaterialsDollars ?? "0.00");
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
   const [addingRoom, setAddingRoom] = useState(false);
   const roomAddPending = useRef(false);
   const active = rooms[activeIndex];
 
-  const calculation = useMemo(() => calculateDraft(rooms, margin), [rooms, margin]);
+  const calculation = useMemo(() => calculateDraft(rooms, margin, otherDirectMaterials), [rooms, margin, otherDirectMaterials]);
   const activeResult = calculation.result?.rooms.find(result => result.roomId === active.id);
 
   function updateRoom(patch: Partial<RoomDraft>) {
@@ -162,9 +174,10 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
     if (saving) return;
     setSaving(true); setStatus("Saving draft…");
     const synchronizedRooms = synchronizeRoomLabor(roomsToSave);
-    const savedCalculation = calculateDraft(synchronizedRooms, margin);
+    const savedCalculation = calculateDraft(synchronizedRooms, margin, otherDirectMaterials);
     const payload = {
       targetGrossMarginPercent: numberValue(margin) ?? ESTIMATION_ASSUMPTIONS.defaultGrossMarginPercent,
+      otherDirectMaterialsDollars: otherDirectMaterials,
       rooms: synchronizedRooms.map((room, sortOrder) => ({
         ...room,
         paintBrand: room.paintBrand.trim(),
@@ -237,9 +250,11 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
     <NumericInput label={label} value={String(active[key])} onChange={value => updateRoom({ [key]: value })} suffix={suffix} prefix={prefix}/>;
   const labor = sharedLaborFromFirstRoom(rooms);
 
-  return <div className="space-y-6">
+  return <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(20rem,1fr)]">
+    <main className="min-w-0 space-y-6">
     <section className="rounded-xl border border-border bg-surface p-5">
       <label className="block text-sm font-medium">Estimate name<input value={title} onChange={event => setTitle(event.target.value)} placeholder="Untitled draft" className="mt-1 min-h-11 w-full rounded-lg border border-border px-3"/></label>
+      <NumericInput className="mt-4" label="Other Direct Materials" value={otherDirectMaterials} prefix="$" min={0} onChange={value=>setOtherDirectMaterials(value)}/>
       <div className="mt-5 border-t border-border pt-5">
         <h2 className="text-xl font-semibold">Labor Setup</h2>
         <p className="mt-1 text-sm text-muted">These labor settings apply to every room in this estimate.</p>
@@ -285,7 +300,7 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
     </section>
 
     <section className="rounded-xl border border-border bg-surface p-5"><h2 className="text-xl font-semibold">Paint Materials</h2>
-      <div className="mt-4 grid gap-4 sm:grid-cols-3">{numeric("Number of Coats","coats")}{numeric("Container Size","containerSizeGallons","gal")}{numeric("Container Quantity","containerQuantity")}{numeric("Price per Container","pricePerContainerDollars",undefined,"$")}</div>
+      <div className="mt-4 grid gap-4 sm:grid-cols-3">{numeric("Number of Coats","coats")}{numeric("Container Size","containerSizeGallons","gal")}{numeric("Price per Container","pricePerContainerDollars",undefined,"$")}</div>
       {canManageFinancials && activeResult && <dl className="mt-4 grid gap-3 rounded-lg bg-background p-4 sm:grid-cols-3">
         <div><dt className="text-xs text-muted">Base Coverage Rate</dt><dd className="font-mono">{ESTIMATION_ASSUMPTIONS.baseCoverageRateSqFtPerGallon} ft²/gal</dd></div>
         <div><dt className="text-xs text-muted">Surface Type</dt><dd className="font-medium">{activeResult.surfaceLabel}</dd></div>
@@ -294,21 +309,11 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
         <div><dt className="text-xs text-muted">Raw Gallons Required</dt><dd className="font-mono">{activeResult.rawGallonsRequired.toFixed(3)} gal</dd></div>
         <div><dt className="text-xs text-muted">Purchased Paint</dt><dd className="font-mono">{activeResult.purchaseQuantity} × {activeResult.containerSizeGallons} gal</dd></div>
       </dl>}
-      {calculation.result && <p className="mt-4 rounded-lg bg-background p-4 text-sm">Project total: <strong className="font-mono">{formatMoney(calculation.result.totals.customerEstimateCents)}</strong></p>}
     </section>
 
     <section className="rounded-xl bg-[#16251d] p-5 text-white">
       <p className="text-sm text-emerald-100/70">Formula {ESTIMATION_ASSUMPTIONS.formulaVersion}. Company production, burden, and overhead assumptions are protected and automatically snapshotted.</p>
       {canManageFinancials && <label className="mt-4 block font-medium" htmlFor="target-margin">Target Gross Margin <strong className="float-right">{margin}%</strong><input id="target-margin" aria-valuetext={`${margin} percent target gross margin`} type="range" min="0" max={ESTIMATION_ASSUMPTIONS.maximumGrossMarginPercent} step="1" value={margin} onChange={event=>setMargin(event.target.value)} className="mt-4 w-full accent-emerald-400"/></label>}
-      {canManageFinancials && calculation.result && <dl className="mt-5 grid gap-3 rounded-lg bg-white/5 p-4 sm:grid-cols-3">
-        <div><dt className="text-xs text-emerald-100/70">Gross wall area</dt><dd className="font-mono">{calculation.result.totals.grossWallAreaSqFt.toFixed(1)} ft²</dd></div>
-        <div><dt className="text-xs text-emerald-100/70">Opening area</dt><dd className="font-mono">{calculation.result.totals.openingAreaSqFt.toFixed(1)} ft²</dd></div>
-        <div><dt className="text-xs text-emerald-100/70">Net paintable area</dt><dd className="font-mono">{calculation.result.totals.netPaintableAreaSqFt.toFixed(1)} ft²</dd></div>
-        <div><dt className="text-xs text-emerald-100/70">Raw gallons required</dt><dd className="font-mono">{calculation.result.totals.rawGallonsRequired.toFixed(3)}</dd></div>
-        <div><dt className="text-xs text-emerald-100/70">Internal cost</dt><dd className="font-mono">{formatMoney(calculation.result.totals.contractorCostCents)}</dd></div>
-        <div><dt className="text-xs text-emerald-100/70">Final customer estimate</dt><dd className="font-mono">{formatMoney(calculation.result.totals.customerEstimateCents)}</dd></div>
-        <div><dt className="text-xs text-emerald-100/70">Expected gross profit</dt><dd className="font-mono">{formatMoney(calculation.result.totals.expectedGrossProfitCents)}</dd></div>
-      </dl>}
       {!calculation.valid && <p role="alert" className="mt-3 rounded-lg bg-amber-100 p-3 text-sm text-amber-950">{calculation.error}</p>}
       <div className="mt-5 grid gap-3 sm:grid-cols-2">
         <button onClick={() => saveDraft()} disabled={saving} className="min-h-12 rounded-lg bg-white font-semibold text-emerald-950 disabled:opacity-60">{saving ? "Saving…" : "Save as Draft"}</button>
@@ -317,5 +322,9 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
       {canManageFinancials && estimateId && <button type="button" onClick={deleteDraft} disabled={saving} className="mt-5 min-h-11 text-sm font-semibold text-red-300 underline-offset-4 hover:underline disabled:opacity-50">Delete Draft</button>}
       {status && <p role="status" className="mt-3 text-sm">{status}</p>}
     </section>
+    </main>
+    <aside className="min-w-0 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
+      <EstimateSummary result={calculation.result} targetMargin={margin}/>
+    </aside>
   </div>;
 }

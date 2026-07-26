@@ -1,5 +1,5 @@
 import Decimal from "decimal.js";
-import { calculatePaintGallons } from "./paint-materials";
+import { calculatePaintGallons, optimizePaintContainers } from "./paint-materials";
 import type { SurfaceTypeKey } from "./surface-types";
 
 export const ESTIMATE_FORMULA_VERSION = "7.0.0";
@@ -85,25 +85,24 @@ export function calculateEstimate(input: EstimateEngineInput) {
   });
   const adjustedCoverageRequirement = new Decimal(materialCoverage.coatAdjustedArea).div(materialCoverage.wasteFactor);
   const rawGallonsRequired = new Decimal(materialCoverage.rawGallonsRequired);
-  const sizes = (input.containerSizesGallons?.length ? input.containerSizesGallons : [5, 1, 0.25]).filter(size => size > 0).sort((a,b)=>b-a);
-  const smallest = sizes.at(-1) ?? 1;
-  const containerSizeGallons = input.containerSizeGallons ?? smallest;
+  const containerSizeGallons = input.containerSizeGallons ?? 1;
   positive(containerSizeGallons, "Container size");
-  const containersRequired = rawGallonsRequired.div(containerSizeGallons).ceil().toNumber();
-  if (input.containerQuantity != null && (!Number.isInteger(input.containerQuantity) || input.containerQuantity < 1)) throw new RangeError("Container quantity must be a positive whole number.");
-  const purchaseQuantity = Math.max(containersRequired, input.containerQuantity ?? containersRequired);
-  if (input.containerQuantity != null && input.containerQuantity < containersRequired) warnings.push("Container quantity was increased to cover the calculated paint requirement.");
-  const gallonsPurchased = new Decimal(containerSizeGallons).mul(purchaseQuantity);
-  const excessGallons = Decimal.max(0, gallonsPurchased.minus(rawGallonsRequired));
-  const recommendedGallons = gallonsPurchased;
-  const containers = sizes.map(size => ({ sizeGallons: size, quantity: 0 }));
-  let remaining = recommendedGallons.toNumber();
-  for (const container of containers) { container.quantity = Math.floor((remaining + 1e-9) / container.sizeGallons); remaining -= container.quantity * container.sizeGallons; }
-
   const pricePerContainer = input.pricePerContainerCents != null
     ? new Decimal(input.pricePerContainerCents)
     : new Decimal(input.paintPricePerGallonCents ?? 0).mul(containerSizeGallons);
-  const paintCost = pricePerContainer.mul(purchaseQuantity);
+  const containers = optimizePaintContainers(rawGallonsRequired.toNumber(), [{
+    containerSizeGallons,
+    unitPriceCents: money(pricePerContainer),
+  }]);
+  const purchaseQuantity = containers.reduce((total,container)=>total+container.quantity,0);
+  const containersRequired = purchaseQuantity;
+  const gallonsPurchased = containers.reduce(
+    (total,container)=>total.plus(new Decimal(container.containerSizeGallons).mul(container.quantity)),
+    new Decimal(0),
+  );
+  const excessGallons = Decimal.max(0, gallonsPurchased.minus(rawGallonsRequired));
+  const recommendedGallons = gallonsPurchased;
+  const paintCost = containers.reduce((total,container)=>total.plus(container.extendedPriceCents),new Decimal(0));
   const materialSubtotal = paintCost.plus(input.additionalMaterialsCents ?? 0);
   // Waste affects paint purchasing, not the wall area a painter must cover.
   const laborCoverageRequirement = netPaintableArea.mul(totalCoats);

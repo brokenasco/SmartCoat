@@ -57,10 +57,19 @@ describe("central estimate engine v6", () => {
     expect(second.taxCents).toBe(first.taxCents);
   });
 
-  it("rounds containers upward and prevents an under-purchase", () => {
+  it("derives container quantity and ignores legacy browser-submitted quantities", () => {
     const result=calculateEstimate({...base,containerSizeGallons:1,containerQuantity:1});
     expect(result.purchaseQuantity).toBe(3);
-    expect(result.warnings.join(" ")).toMatch(/increased/i);
+    expect(result.gallonsPurchased).toBeGreaterThanOrEqual(result.rawGallonsRequired);
+  });
+  it("increases automatic containers with area, coats, and rougher surfaces", () => {
+    const smaller=calculateEstimate({...base,room:{lengthFeet:10,widthFeet:10,heightFeet:8},openings:[],coats:1});
+    const larger=calculateEstimate({...base,room:{lengthFeet:20,widthFeet:20,heightFeet:8},openings:[],coats:1});
+    const twoCoats=calculateEstimate({...base,room:{lengthFeet:20,widthFeet:20,heightFeet:8},openings:[],coats:2});
+    const stucco=calculateEstimate({...base,room:{lengthFeet:20,widthFeet:20,heightFeet:8},openings:[],coats:2,surfaceType:"heavy_stucco"});
+    expect(larger.purchaseQuantity).toBeGreaterThan(smaller.purchaseQuantity);
+    expect(twoCoats.purchaseQuantity).toBeGreaterThan(larger.purchaseQuantity);
+    expect(stucco.purchaseQuantity).toBeGreaterThan(twoCoats.purchaseQuantity);
   });
 
   it("returns structured validation errors for UI callers", () => {
