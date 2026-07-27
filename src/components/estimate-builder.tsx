@@ -13,7 +13,7 @@ import { LEGACY_SURFACE_TYPE, SURFACE_TYPES, type SurfaceTypeKey } from "@/lib/d
 import { EstimateTutorialCoach } from "@/components/estimate-tutorial-coach";
 import { TutorialCompletionModal } from "@/components/tutorial-completion-modal";
 import { TutorialExitModal } from "@/components/tutorial-exit-modal";
-import { ESTIMATE_TUTORIAL_STEPS, ESTIMATE_TUTORIAL_VERSION, TUTORIAL_SAMPLE, trackTutorialEvent, type EstimateTutorialStep, type TutorialPlan } from "@/lib/estimate-tutorial";
+import { ESTIMATE_TUTORIAL_STEPS, ESTIMATE_TUTORIAL_VERSION, PREP_HOURS_LABEL, TUTORIAL_SAMPLE, canPersistEstimate, trackTutorialEvent, type EstimateTutorialStep, type EstimateMode } from "@/lib/estimate-tutorial";
 
 type OpeningKind = "window" | "door" | "archway" | "closet_opening" | "pass_through" | "other";
 type OpeningDraft = { id: string; name: string; kind: OpeningKind; width: string; height: string; quantity: string; subtractFromPaintableArea?: boolean };
@@ -108,7 +108,7 @@ export function friendlyEstimateError(error: { code?: string; message?: string }
     : "We could not approve this estimate. Please try again.";
 }
 
-export function EstimateBuilder({ companyId, estimateId: startingId = null, initialTitle = "", initialMargin, initialPayload, initialAverageHourlyPayCents = 2500, initialOverheadPercent = ESTIMATION_ASSUMPTIONS.overheadPercent, canManageFinancials = true, tutorialMode = false, tutorialPlan = "free" }: {
+export function EstimateBuilder({ companyId, estimateId: startingId = null, initialTitle = "", initialMargin, initialPayload, initialAverageHourlyPayCents = 2500, initialOverheadPercent = ESTIMATION_ASSUMPTIONS.overheadPercent, canManageFinancials = true, tutorialMode = false }: {
   companyId: string;
   estimateId?: string | null;
   initialTitle?: string;
@@ -118,9 +118,9 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
   initialOverheadPercent?: number;
   canManageFinancials?: boolean;
   tutorialMode?: boolean;
-  tutorialPlan?: TutorialPlan;
 }) {
   const router = useRouter();
+  const estimateMode: EstimateMode = tutorialMode ? "tutorial" : startingId ? "edit" : "create";
   const [estimateId, setEstimateId] = useState(startingId);
   const [title, setTitle] = useState(initialTitle);
   const [rooms, setRooms] = useState<RoomDraft[]>(() => synchronizeRoomLabor(initialPayload?.rooms?.length
@@ -139,7 +139,7 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
   const roomAddPending = useRef(false);
   const [tutorialStep, setTutorialStep] = useState<EstimateTutorialStep>("estimate_name");
   const [tutorialError, setTutorialError] = useState("");
-  const [tutorialCompletionAction, setTutorialCompletionAction] = useState<"draft" | "approve" | null>(null);
+  const [tutorialCompleteOpen, setTutorialCompleteOpen] = useState(false);
   const [tutorialExitOpen, setTutorialExitOpen] = useState(false);
   const active = rooms[activeIndex];
 
@@ -164,24 +164,27 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
   }
   function fillTutorialExample() {
     if (tutorialStep === "estimate_name") setTitle(TUTORIAL_SAMPLE.estimateName);
+    else if (tutorialStep === "number_of_workers") updateLabor({ workers: TUTORIAL_SAMPLE.labor.workers });
+    else if (tutorialStep === "prep_hours_per_room") updateLabor({ prepHours: TUTORIAL_SAMPLE.labor.prepHours });
     else if (tutorialStep === "room_name") updateRoom({ name: TUTORIAL_SAMPLE.firstRoom.name });
-    else if (tutorialStep === "room_dimensions") updateRoom({ length: TUTORIAL_SAMPLE.firstRoom.length, width: TUTORIAL_SAMPLE.firstRoom.width, height: TUTORIAL_SAMPLE.firstRoom.height });
-    else if (tutorialStep === "opening_details" && active.openings[0]) updateOpening(active.openings[0].id, { ...TUTORIAL_SAMPLE.opening });
+    else if (tutorialStep === "length") updateRoom({ length: TUTORIAL_SAMPLE.firstRoom.length });
+    else if (tutorialStep === "width") updateRoom({ width: TUTORIAL_SAMPLE.firstRoom.width });
+    else if (tutorialStep === "wall_height") updateRoom({ height: TUTORIAL_SAMPLE.firstRoom.height });
     else if (tutorialStep === "surface_type") updateRoom({ surfaceType: TUTORIAL_SAMPLE.firstRoom.surfaceType });
-    else if (tutorialStep === "paint_details") updateRoom({ coats: TUTORIAL_SAMPLE.firstRoom.coats, paintBrand: TUTORIAL_SAMPLE.firstRoom.paintBrand, paintColorCode: TUTORIAL_SAMPLE.firstRoom.paintColorCode, pricePerContainerDollars: TUTORIAL_SAMPLE.firstRoom.pricePerContainerDollars });
-    else if (tutorialStep === "labor_setup") updateLabor({ workers: TUTORIAL_SAMPLE.labor.workers, prepHours: TUTORIAL_SAMPLE.labor.prepHours });
-    else if (tutorialStep === "second_room_details") updateRoom({ ...TUTORIAL_SAMPLE.secondRoom, surfaceType: TUTORIAL_SAMPLE.secondRoom.surfaceType });
+    else if (tutorialStep === "choose_paint") updateRoom({ coats: TUTORIAL_SAMPLE.firstRoom.coats, paintBrand: TUTORIAL_SAMPLE.firstRoom.paintBrand, paintColorCode: TUTORIAL_SAMPLE.firstRoom.paintColorCode, pricePerContainerDollars: TUTORIAL_SAMPLE.firstRoom.pricePerContainerDollars });
     else if (tutorialStep === "gross_margin") setMargin(TUTORIAL_SAMPLE.grossMargin);
   }
   const tutorialCanContinue = (() => {
     if (tutorialStep === "estimate_name") return Boolean(title.trim());
+    if (tutorialStep === "number_of_workers") return (numberValue(active.workers) ?? 0) > 0;
+    if (tutorialStep === "average_hourly_wage") return (numberValue(active.wageDollars) ?? 0) >= 0;
+    if (tutorialStep === "prep_hours_per_room") return (numberValue(active.prepHours) ?? 0) >= 0;
     if (tutorialStep === "room_name") return Boolean(active.name.trim());
-    if (tutorialStep === "room_dimensions") return [active.length, active.width, active.height].every(value => (numberValue(value) ?? 0) > 0);
-    if (tutorialStep === "opening_details") return Boolean(active.openings[0] && [active.openings[0].width, active.openings[0].height, active.openings[0].quantity].every(value => (numberValue(value) ?? 0) > 0));
+    if (tutorialStep === "length") return (numberValue(active.length) ?? 0) > 0;
+    if (tutorialStep === "width") return (numberValue(active.width) ?? 0) > 0;
+    if (tutorialStep === "wall_height") return (numberValue(active.height) ?? 0) > 0;
     if (tutorialStep === "surface_type") return Boolean(active.surfaceType);
-    if (tutorialStep === "paint_details") return Boolean(active.paintBrand.trim() && active.paintColorCode.trim() && (numberValue(active.coats) ?? 0) > 0 && (numberValue(active.pricePerContainerDollars) ?? 0) > 0);
-    if (tutorialStep === "second_room_details") return rooms.length > 1 && Boolean(active.name.trim() && active.surfaceType && active.paintBrand.trim() && active.paintColorCode.trim() && [active.length, active.width, active.height].every(value => (numberValue(value) ?? 0) > 0));
-    if (tutorialStep === "final_estimate") return calculation.valid && rooms.length === 2;
+    if (tutorialStep === "choose_paint") return Boolean(active.paintBrand.trim() && active.paintColorCode.trim());
     return true;
   })();
   function addOpening() {
@@ -192,13 +195,25 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
     if (roomAddPending.current || addingRoom || saving) return;
     roomAddPending.current = true;
     setAddingRoom(true);
-    const next = roomDraft(rooms.length + 1, { ...active, ...sharedLaborFromFirstRoom(rooms) });
-    const nextRooms = [...rooms, next];
+    const tutorialRooms = tutorialMode ? rooms.map((room, index) => index === 0 ? {
+      ...room,
+      coats: TUTORIAL_SAMPLE.firstRoom.coats,
+      paintBrand: TUTORIAL_SAMPLE.firstRoom.paintBrand,
+      paintColorCode: TUTORIAL_SAMPLE.firstRoom.paintColorCode,
+      pricePerContainerDollars: TUTORIAL_SAMPLE.firstRoom.pricePerContainerDollars,
+    } : room) : rooms;
+    const next = roomDraft(tutorialRooms.length + 1, { ...active, ...sharedLaborFromFirstRoom(tutorialRooms) });
+    const completedNext = tutorialMode ? {
+      ...next,
+      ...TUTORIAL_SAMPLE.secondRoom,
+      surfaceType: TUTORIAL_SAMPLE.secondRoom.surfaceType,
+    } : next;
+    const nextRooms = [...tutorialRooms, completedNext];
     setRooms(nextRooms);
     setActiveIndex(nextRooms.length - 1);
     try {
       if (!tutorialMode) await saveDraft(nextRooms);
-      else if (tutorialStep === "add_second_room") tutorialStepComplete("add_second_room");
+      else if (tutorialStep === "add_room") tutorialStepComplete("add_room");
     } finally {
       roomAddPending.current = false;
       setAddingRoom(false);
@@ -214,10 +229,9 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
     if (estimateId) await saveDraft(nextRooms);
   }
 
-  async function saveDraft(roomsToSave: RoomDraft[] = rooms, forcePersist = false) {
-    if (tutorialMode && !forcePersist) {
-      setTutorialCompletionAction("draft");
-      trackTutorialEvent("premium_modal_viewed", { plan: tutorialPlan, action: "draft" });
+  async function saveDraft(roomsToSave: RoomDraft[] = rooms) {
+    if (!canPersistEstimate(estimateMode)) {
+      setStatus("Tutorial estimates cannot be saved.");
       return;
     }
     if (saving) return;
@@ -259,14 +273,13 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
     return data as string;
   }
 
-  async function approve(forcePersist = false) {
+  async function approve() {
     if (!calculation.valid) return setStatus("This estimate cannot be approved until all required information is complete.");
-    if (tutorialMode && !forcePersist) {
-      setTutorialCompletionAction("approve");
-      trackTutorialEvent("premium_modal_viewed", { plan: tutorialPlan, action: "approve" });
+    if (!canPersistEstimate(estimateMode)) {
+      setStatus("Tutorial estimates cannot be approved.");
       return;
     }
-    const id = await saveDraft(rooms, forcePersist);
+    const id = await saveDraft(rooms);
     if (!id) return;
     const confirmed = window.confirm("Approving this estimate will lock dimensions, paint selections, labor assumptions, material costs, and customer price. Future scope changes require a revision or change order.");
     if (!confirmed) return;
@@ -282,31 +295,21 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
     router.refresh();
   }
 
-  async function finishTutorial(keep: boolean) {
-    if (!tutorialCompletionAction) return;
-    if (keep) {
-      const { error } = await createClient().rpc("complete_estimate_tutorial", { tutorial_version: ESTIMATE_TUTORIAL_VERSION });
-      if (error) {
-        setStatus("We could not complete the tutorial. Please try again.");
-        return;
-      }
-      trackTutorialEvent("tutorial_estimate_kept", { action: tutorialCompletionAction });
-      trackTutorialEvent("tutorial_completed", { plan: tutorialPlan, kept: true });
-      if (tutorialCompletionAction === "approve") await approve(true);
-      else await saveDraft(rooms, true);
-      return;
-    }
-    setSaving(true);
+  async function finishTutorial() {
+    setTutorialCompleteOpen(true);
+    trackTutorialEvent("tutorial_completed", { kept: false });
     const { error } = await createClient().rpc("complete_estimate_tutorial", { tutorial_version: ESTIMATE_TUTORIAL_VERSION });
-    setSaving(false);
-    if (error) {
-      setStatus("We could not complete the tutorial. Please try again.");
-      return;
-    }
-    trackTutorialEvent("tutorial_estimate_discarded", { action: tutorialCompletionAction });
-    trackTutorialEvent("tutorial_completed", { plan: tutorialPlan, kept: false });
+    if (error) console.error("tutorial_completion_metadata_failed", { code: error.code });
+  }
+
+  function closeCompletedTutorial() {
     router.replace("/dashboard");
     router.refresh();
+  }
+
+  function restartTutorial() {
+    setTutorialCompleteOpen(false);
+    router.replace("/dashboard?tutorial=1");
   }
 
   function exitTutorial() {
@@ -315,20 +318,9 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
   }
 
   async function discardExitedTutorial() {
-    setSaving(true);
-    const { error } = await createClient().rpc("complete_estimate_tutorial", { tutorial_version: ESTIMATE_TUTORIAL_VERSION });
-    setSaving(false);
-    if (error) return setTutorialError("We could not exit the tutorial. Please try again.");
     trackTutorialEvent("tutorial_estimate_discarded", { action: "exit" });
     router.replace("/dashboard");
     router.refresh();
-  }
-
-  async function keepExitedTutorial() {
-    const { error } = await createClient().rpc("complete_estimate_tutorial", { tutorial_version: ESTIMATE_TUTORIAL_VERSION });
-    if (error) return setTutorialError("We could not save this tutorial estimate. Please try again.");
-    trackTutorialEvent("tutorial_estimate_kept", { action: "exit" });
-    await saveDraft(rooms, true);
   }
 
   async function deleteDraft() {
@@ -348,8 +340,10 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
     router.refresh();
   }
 
-  const numeric = (label: string, key: keyof RoomDraft, suffix?: string, prefix?: string) =>
-    <NumericInput label={label} value={String(active[key])} onChange={value => updateRoom({ [key]: value })} suffix={suffix} prefix={prefix}/>;
+  const numeric = (label: string, key: keyof RoomDraft, suffix?: string, prefix?: string) => {
+    const tutorialId = key === "length" ? "room-length" : key === "width" ? "room-width" : key === "height" ? "wall-height" : undefined;
+    return <div data-tutorial-id={tutorialId}><NumericInput label={label} value={String(active[key])} onChange={value => updateRoom({ [key]: value })} suffix={suffix} prefix={prefix}/></div>;
+  };
   const labor = sharedLaborFromFirstRoom(rooms);
 
   return <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(20rem,1fr)]">
@@ -360,9 +354,9 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
         <h2 className="text-xl font-semibold">Labor Setup</h2>
         <p className="mt-1 text-sm text-muted">These labor settings apply to every room in this estimate.</p>
         <div className="mt-4 grid gap-4 sm:grid-cols-3">
-          <NumericInput label="Number of Workers" value={labor.workers} onChange={value=>updateLabor({workers:value})}/>
-          <NumericInput label="Average Hourly Wage" value={labor.wageDollars} prefix="$" onChange={value=>updateLabor({wageDollars:value})}/>
-          <NumericInput label="Prep Person-Hours per Room" value={labor.prepHours} suffix="person-hr" onChange={value=>updateLabor({prepHours:value})}/>
+          <div data-tutorial-id="number-of-workers"><NumericInput label="Number of Workers" value={labor.workers} onChange={value=>updateLabor({workers:value})}/></div>
+          <div data-tutorial-id="average-hourly-wage"><NumericInput label="Average Hourly Wage" value={labor.wageDollars} prefix="$" onChange={value=>updateLabor({wageDollars:value})}/></div>
+          <div data-tutorial-id="prep-hours-per-room"><NumericInput label={PREP_HOURS_LABEL} value={labor.prepHours} suffix="person-hr" onChange={value=>updateLabor({prepHours:value})}/></div>
         </div>
       </div>
       <button data-tutorial-id="add-room" type="button" onClick={addRoom} disabled={addingRoom || saving} className="mt-3 min-h-11 rounded-lg border border-brand px-4 font-semibold text-brand disabled:opacity-50">{addingRoom ? "Adding room…" : "Add Room"}</button>
@@ -392,7 +386,7 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
       <button data-tutorial-id="add-opening" type="button" onClick={addOpening} className="mt-4 min-h-11 rounded-lg border border-brand px-4 font-semibold text-brand">Add Opening</button>
     </section>
 
-    <section data-tutorial-id="paint-details" className="rounded-xl border border-border bg-surface p-5"><h2 className="text-xl font-semibold">Choose Your Paint</h2>
+    <section data-tutorial-id="choose-paint" className="rounded-xl border border-border bg-surface p-5"><h2 className="text-xl font-semibold">Choose Your Paint</h2>
       <p className="mt-1 text-sm text-muted">Record the manufacturer and color identifier used for this room.</p>
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <label className="text-sm font-medium">Paint Brand<input required value={active.paintBrand} onChange={event=>updateRoom({paintBrand:event.target.value})} placeholder="e.g. Sherwin-Williams" className="mt-1 min-h-11 w-full rounded-lg border border-border px-3"/></label>
@@ -416,19 +410,20 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
       <p className="text-sm text-emerald-100/70">Formula {ESTIMATION_ASSUMPTIONS.formulaVersion}. This estimate snapshots {initialOverheadPercent}% project overhead and its saved labor assumptions.</p>
       {canManageFinancials && <label data-tutorial-id="gross-margin" className="mt-4 block font-medium" htmlFor="target-margin">Target Gross Margin <strong className="float-right">{margin}%</strong><input id="target-margin" aria-valuetext={`${margin} percent target gross margin`} type="range" min="0" max={ESTIMATION_ASSUMPTIONS.maximumGrossMarginPercent} step="1" value={margin} onChange={event=>setMargin(event.target.value)} className="mt-4 w-full accent-emerald-400"/></label>}
       {!calculation.valid && <p role="alert" className="mt-3 rounded-lg bg-amber-100 p-3 text-sm text-amber-950">{calculation.error}</p>}
-      <div className="mt-5 grid gap-3 sm:grid-cols-2">
-        <button onClick={() => saveDraft()} disabled={saving || (tutorialMode && tutorialStep !== "save_or_approve")} className="min-h-12 rounded-lg bg-white font-semibold text-emerald-950 disabled:opacity-60">{saving ? "Saving…" : "Save as Draft"}</button>
-        {canManageFinancials && <button onClick={() => approve()} disabled={!calculation.valid || (tutorialMode && tutorialStep !== "save_or_approve")} className="min-h-12 rounded-lg bg-emerald-400 font-semibold text-emerald-950 disabled:opacity-50">Approve Estimate</button>}
-      </div>
-      {canManageFinancials && estimateId && <button type="button" onClick={deleteDraft} disabled={saving} className="mt-5 min-h-11 text-sm font-semibold text-red-300 underline-offset-4 hover:underline disabled:opacity-50">Delete Draft</button>}
+      {!tutorialMode && <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        <button onClick={() => saveDraft()} disabled={saving} className="min-h-12 rounded-lg bg-white font-semibold text-emerald-950 disabled:opacity-60">{saving ? "Saving…" : "Save as Draft"}</button>
+        {canManageFinancials && <button onClick={() => approve()} disabled={!calculation.valid} className="min-h-12 rounded-lg bg-emerald-400 font-semibold text-emerald-950 disabled:opacity-50">Approve Estimate</button>}
+      </div>}
+      {tutorialMode && <div className="mt-5 flex flex-wrap gap-3"><button type="button" onClick={exitTutorial} className="min-h-11 rounded-lg border border-white/25 px-4 font-semibold">Exit Tutorial</button><button type="button" onClick={restartTutorial} className="min-h-11 px-4 font-semibold text-emerald-200">Restart Tutorial</button></div>}
+      {!tutorialMode && canManageFinancials && estimateId && <button type="button" onClick={deleteDraft} disabled={saving} className="mt-5 min-h-11 text-sm font-semibold text-red-300 underline-offset-4 hover:underline disabled:opacity-50">Delete Draft</button>}
       {status && <p role="status" className="mt-3 text-sm">{status}</p>}
     </section>
     </main>
     <aside data-tutorial-id="estimate-summary" className="min-w-0 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
       <EstimateSummary result={calculation.result} targetMargin={margin}/>
     </aside>
-    {tutorialMode && <EstimateTutorialCoach step={tutorialStep} canContinue={tutorialCanContinue} error={tutorialError} onFill={fillTutorialExample} onContinue={() => tutorialStepComplete(tutorialStep)} onExit={exitTutorial}/>}
-    {tutorialCompletionAction && <TutorialCompletionModal plan={tutorialPlan} action={tutorialCompletionAction} saving={saving} onKeep={() => finishTutorial(true)} onDiscard={() => finishTutorial(false)}/>}
-    {tutorialExitOpen && <TutorialExitModal saving={saving} onKeep={keepExitedTutorial} onDiscard={discardExitedTutorial} onCancel={() => setTutorialExitOpen(false)}/>}
+    {tutorialMode && !tutorialCompleteOpen && <EstimateTutorialCoach step={tutorialStep} canContinue={tutorialCanContinue} error={tutorialError} onFill={fillTutorialExample} onContinue={() => tutorialStep === "live_estimate_summary" ? finishTutorial() : tutorialStepComplete(tutorialStep)} onBack={() => { const index = ESTIMATE_TUTORIAL_STEPS.indexOf(tutorialStep); if (index > 0) setTutorialStep(ESTIMATE_TUTORIAL_STEPS[index - 1]); }} onExit={exitTutorial}/>}
+    {tutorialCompleteOpen && <TutorialCompletionModal onFinish={closeCompletedTutorial} onRestart={restartTutorial}/>}
+    {tutorialExitOpen && <TutorialExitModal onDiscard={discardExitedTutorial} onCancel={() => setTutorialExitOpen(false)}/>}
   </div>;
 }

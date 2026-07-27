@@ -1,6 +1,6 @@
 begin;
 set local search_path = public, extensions;
-select plan(34);
+select plan(35);
 select has_table('public','estimate_approval_snapshots','approval snapshots exist');
 select has_table('public','estimate_status_history','status history exists');
 select has_table('public','room_openings','normalized room openings exist');
@@ -35,5 +35,6 @@ select is((select count(*)::integer from public.retailer_data_sources s join pub
 select has_column('public','profiles','estimate_tutorial_completed_at','estimate tutorial completion timestamp is stored');
 select has_column('public','profiles','estimate_tutorial_version','estimate tutorial completion is versioned');
 select has_function('public','complete_estimate_tutorial',array['integer'],'authenticated tutorial completion RPC exists');
+select has_trigger('public','estimates','reject_tutorial_estimate_persistence','tutorial estimates cannot be persisted');
 select * from finish();
 rollback;

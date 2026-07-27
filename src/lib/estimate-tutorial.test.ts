@@ -3,7 +3,10 @@ import { calculateMultiRoomEstimate } from "@/lib/domain/multi-room-estimate";
 import { ESTIMATION_ASSUMPTIONS } from "@/lib/domain/estimation-config";
 import {
   ESTIMATE_TUTORIAL_STEPS,
+  PREP_HOURS_LABEL,
   TUTORIAL_SAMPLE,
+  canPersistEstimate,
+  dashboardTutorialTransition,
   isPaidTutorialPlan,
   nextTutorialStep,
   tutorialPlanFromStatus,
@@ -21,20 +24,37 @@ const room = (id: string, name: string, lengthFeet: number, widthFeet: number, s
 describe("estimate tutorial workflow", () => {
   it("uses the required real-estimate step order", () => {
     expect(ESTIMATE_TUTORIAL_STEPS).toEqual([
-      "estimate_name", "room_name", "room_dimensions", "add_opening",
-      "opening_details", "surface_type", "paint_details", "labor_setup",
-      "room_summary", "add_second_room", "second_room_details",
-      "gross_margin", "final_estimate", "save_or_approve",
+      "estimate_name", "number_of_workers", "average_hourly_wage",
+      "prep_hours_per_room", "room_name", "length", "width", "wall_height",
+      "surface_type", "add_room", "add_opening", "choose_paint",
+      "gross_margin", "live_estimate_summary",
     ]);
-    expect(nextTutorialStep("add_opening")).toBe("opening_details");
-    expect(nextTutorialStep("save_or_approve")).toBeNull();
+    expect(nextTutorialStep("add_room")).toBe("add_opening");
+    expect(nextTutorialStep("live_estimate_summary")).toBeNull();
   });
 
   it("uses the requested realistic sample data", () => {
-    expect(TUTORIAL_SAMPLE.estimateName).toBe("Johnson Interior Repaint");
+    expect(TUTORIAL_SAMPLE.estimateName).toBe("Tutorial Estimate");
     expect(TUTORIAL_SAMPLE.firstRoom.paintColorCode).toBe("N430-6A");
     expect(TUTORIAL_SAMPLE.secondRoom.paintColorCode).toBe("SW 7005");
     expect(TUTORIAL_SAMPLE.opening.subtractFromPaintableArea).toBe(true);
+  });
+
+  it("never permits tutorial estimate persistence", () => {
+    expect(canPersistEstimate("tutorial")).toBe(false);
+    expect(canPersistEstimate("create")).toBe(true);
+    expect(canPersistEstimate("edit")).toBe(true);
+  });
+
+  it("starts immediately in memory without a reload", () => {
+    expect(dashboardTutorialTransition("idle", "start")).toBe("introduction");
+    expect(dashboardTutorialTransition("introduction", "begin")).toBe("new_estimate");
+    expect(dashboardTutorialTransition("new_estimate", "cancel")).toBe("idle");
+  });
+
+  it("uses the renamed prep-hours label", () => {
+    expect(PREP_HOURS_LABEL).toBe("Prep Hours per Room");
+    expect(PREP_HOURS_LABEL).not.toContain("Person-Hours");
   });
 
   it("deducts the tutorial opening and calculates both rooms with the real engine", () => {

@@ -1,27 +1,30 @@
 export const ESTIMATE_TUTORIAL_VERSION = 1;
+export const PREP_HOURS_LABEL = "Prep Hours per Room";
 
 export const ESTIMATE_TUTORIAL_STEPS = [
   "estimate_name",
+  "number_of_workers",
+  "average_hourly_wage",
+  "prep_hours_per_room",
   "room_name",
-  "room_dimensions",
-  "add_opening",
-  "opening_details",
+  "length",
+  "width",
+  "wall_height",
   "surface_type",
-  "paint_details",
-  "labor_setup",
-  "room_summary",
-  "add_second_room",
-  "second_room_details",
+  "add_room",
+  "add_opening",
+  "choose_paint",
   "gross_margin",
-  "final_estimate",
-  "save_or_approve",
+  "live_estimate_summary",
 ] as const;
 
 export type EstimateTutorialStep = typeof ESTIMATE_TUTORIAL_STEPS[number];
+export type EstimateMode = "create" | "edit" | "tutorial";
+export type DashboardTutorialState = "idle" | "introduction" | "new_estimate";
 export type TutorialPlan = "free" | "trial" | "premium" | "enterprise";
 
 export const TUTORIAL_SAMPLE = {
-  estimateName: "Johnson Interior Repaint",
+  estimateName: "Tutorial Estimate",
   firstRoom: {
     name: "Living Room", length: "16", width: "14", height: "8",
     surfaceType: "smooth_previously_painted_drywall",
@@ -55,6 +58,17 @@ export function isPaidTutorialPlan(plan: TutorialPlan) {
 export function nextTutorialStep(step: EstimateTutorialStep) {
   const index = ESTIMATE_TUTORIAL_STEPS.indexOf(step);
   return index < ESTIMATE_TUTORIAL_STEPS.length - 1 ? ESTIMATE_TUTORIAL_STEPS[index + 1] : null;
+}
+
+export function canPersistEstimate(mode: EstimateMode) {
+  return mode !== "tutorial";
+}
+
+export function dashboardTutorialTransition(state: DashboardTutorialState, event: "start" | "begin" | "cancel"): DashboardTutorialState {
+  if (event === "start") return "introduction";
+  if (event === "begin" && state === "introduction") return "new_estimate";
+  if (event === "cancel") return "idle";
+  return state;
 }
 
 export function trackTutorialEvent(name: string, detail: Record<string, string | number | boolean> = {}) {
