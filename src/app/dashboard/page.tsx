@@ -8,6 +8,7 @@ import { getCompanyEntitlement } from "@/lib/entitlements";
 import { PremiumGate } from "@/components/premium-gate";
 import { DashboardTutorial } from "@/components/dashboard-tutorial";
 import { tutorialPlanFromStatus } from "@/lib/estimate-tutorial";
+import { AccountMenu } from "@/components/account-menu";
 
 export const dynamic = "force-dynamic";
 
@@ -23,9 +24,11 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const { data: estimates } = await supabase.from("estimates").select("id,title,status,total_cents,created_at").eq("company_id", membership.company_id).is("deleted_at",null).order("created_at", { ascending: false }).limit(8);
   const pipeline = (estimates ?? []).reduce((sum, estimate) => sum + estimate.total_cents, 0);
   const company = Array.isArray(membership.companies) ? membership.companies[0] : membership.companies;
+  const { data: profile } = await supabase.from("profiles").select("full_name").eq("id", user.id).maybeSingle();
+  const userName = profile?.full_name?.trim() || user.email?.split("@")[0] || "Account";
   return <main className="min-h-screen">
     <div data-tutorial-id="dashboard-main" aria-hidden={!hasPremiumAccess && !tutorialActive} inert={!hasPremiumAccess && !tutorialActive ? true : undefined} className={!hasPremiumAccess && !tutorialActive ? "pointer-events-none select-none" : undefined}>
-    <header className="border-b border-border bg-surface"><div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4"><Link href="/dashboard" className="text-xl font-bold"><span className="text-brand">Smart</span>Coat</Link><div className="flex items-center gap-5"><Link href="/settings/product-tour" className="text-sm font-semibold text-brand">Product tour</Link><div className="text-right"><p className="text-sm font-medium">{company?.name ?? "Company"}</p><p className="text-xs uppercase text-muted">{membership.role}</p></div></div></div></header>
+    <header className="border-b border-border bg-surface"><div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4"><Link href="/dashboard" className="text-xl font-bold"><span className="text-brand">Smart</span>Coat</Link><div className="flex items-center gap-3 sm:gap-5"><Link href="/settings/product-tour" className="hidden text-sm font-semibold text-brand sm:block">Product tour</Link><AccountMenu userName={userName} companyName={company?.name ?? "Company"} role={membership.role}/></div></div></header>
     <div className="mx-auto max-w-7xl px-5 py-8">
       <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-sm text-muted">Operations overview</p><h1 className="text-3xl font-semibold tracking-tight">Good work starts with a clear number.</h1></div><div className="flex flex-wrap gap-3"><Link href="/dashboard?tutorial=1" className="inline-flex min-h-12 items-center rounded-lg border border-border px-5 font-semibold text-brand">Start Tutorial</Link><Link href="/dashboard/estimates" className="inline-flex min-h-12 items-center rounded-lg border border-brand px-5 font-semibold text-brand">Drafts & Approved</Link><Link data-tutorial-id="new-estimate-button" href={tutorialActive ? "/dashboard/estimates/new?tutorial=1" : "/dashboard/estimates/new"} className="inline-flex min-h-12 items-center gap-2 rounded-lg bg-brand px-5 font-semibold text-white"><Plus size={18}/>New estimate</Link></div></div>
       <section className="mt-8 grid gap-4 sm:grid-cols-3"><Metric icon={ClipboardList} label="Recent estimates" value={String(estimates?.length ?? 0)}/><Metric icon={CircleDollarSign} label="Estimate pipeline" value={formatMoney(pipeline)}/><Metric icon={Users} label="Current role" value={membership.role.replaceAll("_", " ")}/></section>
