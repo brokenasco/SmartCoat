@@ -13,7 +13,7 @@ import { LEGACY_SURFACE_TYPE, SURFACE_TYPES, type SurfaceTypeKey } from "@/lib/d
 import { EstimateTutorialCoach } from "@/components/estimate-tutorial-coach";
 import { TutorialCompletionModal } from "@/components/tutorial-completion-modal";
 import { TutorialExitModal } from "@/components/tutorial-exit-modal";
-import { ESTIMATE_TUTORIAL_STEPS, ESTIMATE_TUTORIAL_VERSION, PREP_HOURS_LABEL, TUTORIAL_SAMPLE, canPersistEstimate, trackTutorialEvent, type EstimateTutorialStep, type EstimateMode } from "@/lib/estimate-tutorial";
+import { ESTIMATE_TUTORIAL_STEPS, ESTIMATE_TUTORIAL_VERSION, PREP_HOURS_LABEL, TUTORIAL_SAMPLE, canPersistEstimate, trackTutorialEvent, type EstimateTutorialStep, type EstimateMode, type TutorialPlan } from "@/lib/estimate-tutorial";
 
 type OpeningKind = "window" | "door" | "archway" | "closet_opening" | "pass_through" | "other";
 type OpeningDraft = { id: string; name: string; kind: OpeningKind; width: string; height: string; quantity: string; subtractFromPaintableArea?: boolean };
@@ -108,7 +108,7 @@ export function friendlyEstimateError(error: { code?: string; message?: string }
     : "We could not approve this estimate. Please try again.";
 }
 
-export function EstimateBuilder({ companyId, estimateId: startingId = null, initialTitle = "", initialMargin, initialPayload, initialAverageHourlyPayCents = 2500, initialOverheadPercent = ESTIMATION_ASSUMPTIONS.overheadPercent, canManageFinancials = true, tutorialMode = false }: {
+export function EstimateBuilder({ companyId, estimateId: startingId = null, initialTitle = "", initialMargin, initialPayload, initialAverageHourlyPayCents = 2500, initialOverheadPercent = ESTIMATION_ASSUMPTIONS.overheadPercent, canManageFinancials = true, tutorialMode = false, tutorialPlan = "free" }: {
   companyId: string;
   estimateId?: string | null;
   initialTitle?: string;
@@ -118,6 +118,7 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
   initialOverheadPercent?: number;
   canManageFinancials?: boolean;
   tutorialMode?: boolean;
+  tutorialPlan?: TutorialPlan;
 }) {
   const router = useRouter();
   const estimateMode: EstimateMode = tutorialMode ? "tutorial" : startingId ? "edit" : "create";
@@ -297,6 +298,7 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
 
   async function finishTutorial() {
     setTutorialCompleteOpen(true);
+    trackTutorialEvent("premium_modal_viewed", { plan: tutorialPlan });
     trackTutorialEvent("tutorial_completed", { kept: false });
     const { error } = await createClient().rpc("complete_estimate_tutorial", { tutorial_version: ESTIMATE_TUTORIAL_VERSION });
     if (error) console.error("tutorial_completion_metadata_failed", { code: error.code });
@@ -423,7 +425,7 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
       <EstimateSummary result={calculation.result} targetMargin={margin}/>
     </aside>
     {tutorialMode && !tutorialCompleteOpen && <EstimateTutorialCoach step={tutorialStep} canContinue={tutorialCanContinue} error={tutorialError} onFill={fillTutorialExample} onContinue={() => tutorialStep === "live_estimate_summary" ? finishTutorial() : tutorialStepComplete(tutorialStep)} onBack={() => { const index = ESTIMATE_TUTORIAL_STEPS.indexOf(tutorialStep); if (index > 0) setTutorialStep(ESTIMATE_TUTORIAL_STEPS[index - 1]); }} onExit={exitTutorial}/>}
-    {tutorialCompleteOpen && <TutorialCompletionModal onFinish={closeCompletedTutorial} onRestart={restartTutorial}/>}
+    {tutorialCompleteOpen && <TutorialCompletionModal plan={tutorialPlan} onFinish={closeCompletedTutorial} onRestart={restartTutorial}/>}
     {tutorialExitOpen && <TutorialExitModal onDiscard={discardExitedTutorial} onCancel={() => setTutorialExitOpen(false)}/>}
   </div>;
 }
