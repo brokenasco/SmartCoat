@@ -10,6 +10,10 @@ import { parseNumericInput } from "@/lib/domain/numeric-input";
 import { sharedLaborFromFirstRoom, synchronizeRoomLabor, updateSharedLabor, type SharedLaborFields } from "@/lib/domain/shared-labor";
 import { createClient } from "@/lib/supabase/browser";
 import { LEGACY_SURFACE_TYPE, SURFACE_TYPES, type SurfaceTypeKey } from "@/lib/domain/surface-types";
+import { EstimateTutorialCoach } from "@/components/estimate-tutorial-coach";
+import { TutorialCompletionModal } from "@/components/tutorial-completion-modal";
+import { TutorialExitModal } from "@/components/tutorial-exit-modal";
+import { ESTIMATE_TUTORIAL_STEPS, ESTIMATE_TUTORIAL_VERSION, TUTORIAL_SAMPLE, trackTutorialEvent, type EstimateTutorialStep, type TutorialPlan } from "@/lib/estimate-tutorial";
 
 type OpeningKind = "window" | "door" | "archway" | "closet_opening" | "pass_through" | "other";
 type OpeningDraft = { id: string; name: string; kind: OpeningKind; width: string; height: string; quantity: string; subtractFromPaintableArea?: boolean };
@@ -104,7 +108,7 @@ export function friendlyEstimateError(error: { code?: string; message?: string }
     : "We could not approve this estimate. Please try again.";
 }
 
-export function EstimateBuilder({ companyId, estimateId: startingId = null, initialTitle = "", initialMargin, initialPayload, initialAverageHourlyPayCents = 2500, initialOverheadPercent = ESTIMATION_ASSUMPTIONS.overheadPercent, canManageFinancials = true }: {
+export function EstimateBuilder({ companyId, estimateId: startingId = null, initialTitle = "", initialMargin, initialPayload, initialAverageHourlyPayCents = 2500, initialOverheadPercent = ESTIMATION_ASSUMPTIONS.overheadPercent, canManageFinancials = true, tutorialMode = false, tutorialPlan = "free" }: {
   companyId: string;
   estimateId?: string | null;
   initialTitle?: string;
@@ -113,6 +117,8 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
   initialAverageHourlyPayCents?: number;
   initialOverheadPercent?: number;
   canManageFinancials?: boolean;
+  tutorialMode?: boolean;
+  tutorialPlan?: TutorialPlan;
 }) {
   const router = useRouter();
   const [estimateId, setEstimateId] = useState(startingId);
@@ -131,10 +137,21 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
   const [saving, setSaving] = useState(false);
   const [addingRoom, setAddingRoom] = useState(false);
   const roomAddPending = useRef(false);
+  const [tutorialStep, setTutorialStep] = useState<EstimateTutorialStep>("estimate_name");
+  const [tutorialError, setTutorialError] = useState("");
+  const [tutorialCompletionAction, setTutorialCompletionAction] = useState<"draft" | "approve" | null>(null);
+  const [tutorialExitOpen, setTutorialExitOpen] = useState(false);
   const active = rooms[activeIndex];
 
   const calculation = useMemo(() => calculateDraft(rooms, margin, initialOverheadPercent), [rooms, margin, initialOverheadPercent]);
   const activeResult = calculation.result?.rooms.find(result => result.roomId === active.id);
+
+  function tutorialStepComplete(step: EstimateTutorialStep) {
+    trackTutorialEvent("tutorial_step_completed", { step });
+    const index = ESTIMATE_TUTORIAL_STEPS.indexOf(step);
+    if (index < ESTIMATE_TUTORIAL_STEPS.length - 1) setTutorialStep(ESTIMATE_TUTORIAL_STEPS[index + 1]);
+    setTutorialError("");
+  }
 
   function updateRoom(patch: Partial<RoomDraft>) {
     setRooms(current => current.map((room, index) => index === activeIndex ? { ...room, ...patch } : room));
@@ -145,8 +162,31 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
   function updateOpening(id: string, patch: Partial<OpeningDraft>) {
     updateRoom({ openings: active.openings.map(opening => opening.id === id ? { ...opening, ...patch } : opening) });
   }
+  function fillTutorialExample() {
+    if (tutorialStep === "estimate_name") setTitle(TUTORIAL_SAMPLE.estimateName);
+    else if (tutorialStep === "room_name") updateRoom({ name: TUTORIAL_SAMPLE.firstRoom.name });
+    else if (tutorialStep === "room_dimensions") updateRoom({ length: TUTORIAL_SAMPLE.firstRoom.length, width: TUTORIAL_SAMPLE.firstRoom.width, height: TUTORIAL_SAMPLE.firstRoom.height });
+    else if (tutorialStep === "opening_details" && active.openings[0]) updateOpening(active.openings[0].id, { ...TUTORIAL_SAMPLE.opening });
+    else if (tutorialStep === "surface_type") updateRoom({ surfaceType: TUTORIAL_SAMPLE.firstRoom.surfaceType });
+    else if (tutorialStep === "paint_details") updateRoom({ coats: TUTORIAL_SAMPLE.firstRoom.coats, paintBrand: TUTORIAL_SAMPLE.firstRoom.paintBrand, paintColorCode: TUTORIAL_SAMPLE.firstRoom.paintColorCode, pricePerContainerDollars: TUTORIAL_SAMPLE.firstRoom.pricePerContainerDollars });
+    else if (tutorialStep === "labor_setup") updateLabor({ workers: TUTORIAL_SAMPLE.labor.workers, prepHours: TUTORIAL_SAMPLE.labor.prepHours });
+    else if (tutorialStep === "second_room_details") updateRoom({ ...TUTORIAL_SAMPLE.secondRoom, surfaceType: TUTORIAL_SAMPLE.secondRoom.surfaceType });
+    else if (tutorialStep === "gross_margin") setMargin(TUTORIAL_SAMPLE.grossMargin);
+  }
+  const tutorialCanContinue = (() => {
+    if (tutorialStep === "estimate_name") return Boolean(title.trim());
+    if (tutorialStep === "room_name") return Boolean(active.name.trim());
+    if (tutorialStep === "room_dimensions") return [active.length, active.width, active.height].every(value => (numberValue(value) ?? 0) > 0);
+    if (tutorialStep === "opening_details") return Boolean(active.openings[0] && [active.openings[0].width, active.openings[0].height, active.openings[0].quantity].every(value => (numberValue(value) ?? 0) > 0));
+    if (tutorialStep === "surface_type") return Boolean(active.surfaceType);
+    if (tutorialStep === "paint_details") return Boolean(active.paintBrand.trim() && active.paintColorCode.trim() && (numberValue(active.coats) ?? 0) > 0 && (numberValue(active.pricePerContainerDollars) ?? 0) > 0);
+    if (tutorialStep === "second_room_details") return rooms.length > 1 && Boolean(active.name.trim() && active.surfaceType && active.paintBrand.trim() && active.paintColorCode.trim() && [active.length, active.width, active.height].every(value => (numberValue(value) ?? 0) > 0));
+    if (tutorialStep === "final_estimate") return calculation.valid && rooms.length === 2;
+    return true;
+  })();
   function addOpening() {
     updateRoom({ openings: [...active.openings, { id: crypto.randomUUID(), name: `Opening ${active.openings.length + 1}`, kind: "window", width: "", height: "", quantity: "1", subtractFromPaintableArea: true }] });
+    if (tutorialMode && tutorialStep === "add_opening") tutorialStepComplete("add_opening");
   }
   async function addRoom() {
     if (roomAddPending.current || addingRoom || saving) return;
@@ -157,7 +197,8 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
     setRooms(nextRooms);
     setActiveIndex(nextRooms.length - 1);
     try {
-      await saveDraft(nextRooms);
+      if (!tutorialMode) await saveDraft(nextRooms);
+      else if (tutorialStep === "add_second_room") tutorialStepComplete("add_second_room");
     } finally {
       roomAddPending.current = false;
       setAddingRoom(false);
@@ -173,7 +214,12 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
     if (estimateId) await saveDraft(nextRooms);
   }
 
-  async function saveDraft(roomsToSave: RoomDraft[] = rooms) {
+  async function saveDraft(roomsToSave: RoomDraft[] = rooms, forcePersist = false) {
+    if (tutorialMode && !forcePersist) {
+      setTutorialCompletionAction("draft");
+      trackTutorialEvent("premium_modal_viewed", { plan: tutorialPlan, action: "draft" });
+      return;
+    }
     if (saving) return;
     setSaving(true); setStatus("Saving draft…");
     const synchronizedRooms = synchronizeRoomLabor(roomsToSave);
@@ -213,9 +259,14 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
     return data as string;
   }
 
-  async function approve() {
+  async function approve(forcePersist = false) {
     if (!calculation.valid) return setStatus("This estimate cannot be approved until all required information is complete.");
-    const id = await saveDraft();
+    if (tutorialMode && !forcePersist) {
+      setTutorialCompletionAction("approve");
+      trackTutorialEvent("premium_modal_viewed", { plan: tutorialPlan, action: "approve" });
+      return;
+    }
+    const id = await saveDraft(rooms, forcePersist);
     if (!id) return;
     const confirmed = window.confirm("Approving this estimate will lock dimensions, paint selections, labor assumptions, material costs, and customer price. Future scope changes require a revision or change order.");
     if (!confirmed) return;
@@ -229,6 +280,55 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
     }
     router.replace(`/dashboard/estimates/${id}`);
     router.refresh();
+  }
+
+  async function finishTutorial(keep: boolean) {
+    if (!tutorialCompletionAction) return;
+    if (keep) {
+      const { error } = await createClient().rpc("complete_estimate_tutorial", { tutorial_version: ESTIMATE_TUTORIAL_VERSION });
+      if (error) {
+        setStatus("We could not complete the tutorial. Please try again.");
+        return;
+      }
+      trackTutorialEvent("tutorial_estimate_kept", { action: tutorialCompletionAction });
+      trackTutorialEvent("tutorial_completed", { plan: tutorialPlan, kept: true });
+      if (tutorialCompletionAction === "approve") await approve(true);
+      else await saveDraft(rooms, true);
+      return;
+    }
+    setSaving(true);
+    const { error } = await createClient().rpc("complete_estimate_tutorial", { tutorial_version: ESTIMATE_TUTORIAL_VERSION });
+    setSaving(false);
+    if (error) {
+      setStatus("We could not complete the tutorial. Please try again.");
+      return;
+    }
+    trackTutorialEvent("tutorial_estimate_discarded", { action: tutorialCompletionAction });
+    trackTutorialEvent("tutorial_completed", { plan: tutorialPlan, kept: false });
+    router.replace("/dashboard");
+    router.refresh();
+  }
+
+  function exitTutorial() {
+    trackTutorialEvent("tutorial_exited", { step: tutorialStep });
+    setTutorialExitOpen(true);
+  }
+
+  async function discardExitedTutorial() {
+    setSaving(true);
+    const { error } = await createClient().rpc("complete_estimate_tutorial", { tutorial_version: ESTIMATE_TUTORIAL_VERSION });
+    setSaving(false);
+    if (error) return setTutorialError("We could not exit the tutorial. Please try again.");
+    trackTutorialEvent("tutorial_estimate_discarded", { action: "exit" });
+    router.replace("/dashboard");
+    router.refresh();
+  }
+
+  async function keepExitedTutorial() {
+    const { error } = await createClient().rpc("complete_estimate_tutorial", { tutorial_version: ESTIMATE_TUTORIAL_VERSION });
+    if (error) return setTutorialError("We could not save this tutorial estimate. Please try again.");
+    trackTutorialEvent("tutorial_estimate_kept", { action: "exit" });
+    await saveDraft(rooms, true);
   }
 
   async function deleteDraft() {
@@ -255,8 +355,8 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
   return <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(20rem,1fr)]">
     <main className="min-w-0 space-y-6">
     <section className="rounded-xl border border-border bg-surface p-5">
-      <label className="block text-sm font-medium">Estimate name<input value={title} onChange={event => setTitle(event.target.value)} placeholder="Untitled draft" className="mt-1 min-h-11 w-full rounded-lg border border-border px-3"/></label>
-      <div className="mt-5 border-t border-border pt-5">
+      <label data-tutorial-id="estimate-name" className="block text-sm font-medium">Estimate name<input value={title} onChange={event => setTitle(event.target.value)} placeholder="Untitled draft" className="mt-1 min-h-11 w-full rounded-lg border border-border px-3"/></label>
+      <div data-tutorial-id="labor-setup" className="mt-5 border-t border-border pt-5">
         <h2 className="text-xl font-semibold">Labor Setup</h2>
         <p className="mt-1 text-sm text-muted">These labor settings apply to every room in this estimate.</p>
         <div className="mt-4 grid gap-4 sm:grid-cols-3">
@@ -265,21 +365,21 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
           <NumericInput label="Prep Person-Hours per Room" value={labor.prepHours} suffix="person-hr" onChange={value=>updateLabor({prepHours:value})}/>
         </div>
       </div>
-      <button type="button" onClick={addRoom} disabled={addingRoom || saving} className="mt-3 min-h-11 rounded-lg border border-brand px-4 font-semibold text-brand disabled:opacity-50">{addingRoom ? "Adding room…" : "Add Room"}</button>
+      <button data-tutorial-id="add-room" type="button" onClick={addRoom} disabled={addingRoom || saving} className="mt-3 min-h-11 rounded-lg border border-brand px-4 font-semibold text-brand disabled:opacity-50">{addingRoom ? "Adding room…" : "Add Room"}</button>
       <nav aria-label="Estimate rooms" className="mt-5 flex flex-wrap gap-2">{rooms.map((room,index) =>
         <button key={room.id} onClick={() => setActiveIndex(index)} aria-current={index===activeIndex ? "page" : undefined} className={`min-h-11 rounded-lg border px-4 text-sm font-semibold ${index===activeIndex ? "border-brand bg-brand text-white" : "border-border"}`}>{room.name}</button>)}</nav>
     </section>
 
-    <section className="rounded-xl border border-border bg-surface p-5">
+    <section data-tutorial-id="room-dimensions" className="rounded-xl border border-border bg-surface p-5">
       <div className="flex items-center justify-between gap-4"><div><h2 className="text-xl font-semibold">Room Dimensions</h2><p className="text-sm text-muted">Enter length, width, and wall height to calculate gross wall surface.</p></div><button type="button" onClick={() => removeRoom(active.id)} disabled={rooms.length === 1 || saving} title={rooms.length === 1 ? "At least one room is required." : "Remove this room"} className="text-sm font-semibold text-red-700 disabled:cursor-not-allowed disabled:opacity-40">Remove room</button></div>
-      <label className="mt-4 block text-sm font-medium">Room name<input value={active.name} onChange={event => updateRoom({name:event.target.value})} className="mt-1 min-h-11 w-full rounded-lg border border-border px-3"/></label>
+      <label data-tutorial-id="room-name" className="mt-4 block text-sm font-medium">Room name<input value={active.name} onChange={event => updateRoom({name:event.target.value})} className="mt-1 min-h-11 w-full rounded-lg border border-border px-3"/></label>
       <div className="mt-4 grid gap-4 sm:grid-cols-3">{numeric("Length","length","ft")}{numeric("Width","width","ft")}{numeric("Wall Height","height","ft")}</div>
-      <label className="mt-4 block text-sm font-medium">Surface Type<select required value={active.surfaceType} onChange={event=>updateRoom({surfaceType:event.target.value as SurfaceTypeKey|""})} className="mt-1 min-h-11 w-full rounded-lg border border-border bg-white px-3"><option value="">Select a surface type</option>{SURFACE_TYPES.map(surface=><option key={surface.key} value={surface.key}>{surface.label}</option>)}</select></label>
+      <label data-tutorial-id="surface-type" className="mt-4 block text-sm font-medium">Surface Type<select required value={active.surfaceType} onChange={event=>updateRoom({surfaceType:event.target.value as SurfaceTypeKey|""})} className="mt-1 min-h-11 w-full rounded-lg border border-border bg-white px-3"><option value="">Select a surface type</option>{SURFACE_TYPES.map(surface=><option key={surface.key} value={surface.key}>{surface.label}</option>)}</select></label>
     </section>
 
     <section className="rounded-xl border border-border bg-surface p-5">
       <div><h2 className="text-xl font-semibold">Openings</h2><p className="text-sm text-muted">Deduct windows, doors, and other non-paintable areas from gross wall area.</p></div>
-      <div className="mt-4 space-y-3">{active.openings.map(opening => <div key={opening.id} className="grid gap-3 rounded-lg bg-background p-3 sm:grid-cols-2 lg:grid-cols-7">
+      <div className="mt-4 space-y-3">{active.openings.map(opening => <div data-tutorial-id="opening-details" key={opening.id} className="grid gap-3 rounded-lg bg-background p-3 sm:grid-cols-2 lg:grid-cols-7">
         <label className="text-sm">Opening type<select value={opening.kind} onChange={event=>updateOpening(opening.id,{kind:event.target.value as OpeningKind})} className="mt-1 min-h-11 w-full rounded-lg border px-3"><option value="window">Window</option><option value="door">Door</option><option value="archway">Archway</option><option value="closet_opening">Closet Opening</option><option value="pass_through">Pass-Through</option><option value="other">Other</option></select></label>
         <label className="text-sm">Name<input value={opening.name} onChange={e=>updateOpening(opening.id,{name:e.target.value})} className="mt-1 min-h-11 w-full rounded-lg border px-3"/></label>
         <NumericInput label="Width" value={opening.width} suffix="ft" onChange={value=>updateOpening(opening.id,{width:value})}/>
@@ -289,10 +389,10 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
         <p className="self-end pb-3 text-sm">Area: <strong>{((numberValue(opening.width)??0)*(numberValue(opening.height)??0)*(numberValue(opening.quantity)??0)).toFixed(1)} ft²</strong></p>
         <button onClick={()=>updateRoom({openings:active.openings.filter(item=>item.id!==opening.id)})} className="self-end min-h-11 text-sm font-semibold text-red-700">Remove Opening</button>
       </div>)}</div>
-      <button type="button" onClick={addOpening} className="mt-4 min-h-11 rounded-lg border border-brand px-4 font-semibold text-brand">Add Opening</button>
+      <button data-tutorial-id="add-opening" type="button" onClick={addOpening} className="mt-4 min-h-11 rounded-lg border border-brand px-4 font-semibold text-brand">Add Opening</button>
     </section>
 
-    <section className="rounded-xl border border-border bg-surface p-5"><h2 className="text-xl font-semibold">Choose Your Paint</h2>
+    <section data-tutorial-id="paint-details" className="rounded-xl border border-border bg-surface p-5"><h2 className="text-xl font-semibold">Choose Your Paint</h2>
       <p className="mt-1 text-sm text-muted">Record the manufacturer and color identifier used for this room.</p>
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <label className="text-sm font-medium">Paint Brand<input required value={active.paintBrand} onChange={event=>updateRoom({paintBrand:event.target.value})} placeholder="e.g. Sherwin-Williams" className="mt-1 min-h-11 w-full rounded-lg border border-border px-3"/></label>
@@ -300,7 +400,7 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
       </div>
     </section>
 
-    <section className="rounded-xl border border-border bg-surface p-5"><h2 className="text-xl font-semibold">Paint Materials</h2>
+    <section data-tutorial-id="paint-materials" className="rounded-xl border border-border bg-surface p-5"><h2 className="text-xl font-semibold">Paint Materials</h2>
       <div className="mt-4 grid gap-4 sm:grid-cols-3">{numeric("Number of Coats","coats")}{numeric("Container Size","containerSizeGallons","gal")}{numeric("Price per Container","pricePerContainerDollars",undefined,"$")}</div>
       {canManageFinancials && activeResult && <dl className="mt-4 grid gap-3 rounded-lg bg-background p-4 sm:grid-cols-3">
         <div><dt className="text-xs text-muted">Base Coverage Rate</dt><dd className="font-mono">{ESTIMATION_ASSUMPTIONS.baseCoverageRateSqFtPerGallon} ft²/gal</dd></div>
@@ -312,20 +412,23 @@ export function EstimateBuilder({ companyId, estimateId: startingId = null, init
       </dl>}
     </section>
 
-    <section className="rounded-xl bg-[#16251d] p-5 text-white">
+    <section data-tutorial-id="save-or-approve" className="rounded-xl bg-[#16251d] p-5 text-white">
       <p className="text-sm text-emerald-100/70">Formula {ESTIMATION_ASSUMPTIONS.formulaVersion}. This estimate snapshots {initialOverheadPercent}% project overhead and its saved labor assumptions.</p>
-      {canManageFinancials && <label className="mt-4 block font-medium" htmlFor="target-margin">Target Gross Margin <strong className="float-right">{margin}%</strong><input id="target-margin" aria-valuetext={`${margin} percent target gross margin`} type="range" min="0" max={ESTIMATION_ASSUMPTIONS.maximumGrossMarginPercent} step="1" value={margin} onChange={event=>setMargin(event.target.value)} className="mt-4 w-full accent-emerald-400"/></label>}
+      {canManageFinancials && <label data-tutorial-id="gross-margin" className="mt-4 block font-medium" htmlFor="target-margin">Target Gross Margin <strong className="float-right">{margin}%</strong><input id="target-margin" aria-valuetext={`${margin} percent target gross margin`} type="range" min="0" max={ESTIMATION_ASSUMPTIONS.maximumGrossMarginPercent} step="1" value={margin} onChange={event=>setMargin(event.target.value)} className="mt-4 w-full accent-emerald-400"/></label>}
       {!calculation.valid && <p role="alert" className="mt-3 rounded-lg bg-amber-100 p-3 text-sm text-amber-950">{calculation.error}</p>}
       <div className="mt-5 grid gap-3 sm:grid-cols-2">
-        <button onClick={() => saveDraft()} disabled={saving} className="min-h-12 rounded-lg bg-white font-semibold text-emerald-950 disabled:opacity-60">{saving ? "Saving…" : "Save as Draft"}</button>
-        {canManageFinancials && <button onClick={approve} disabled={!calculation.valid} className="min-h-12 rounded-lg bg-emerald-400 font-semibold text-emerald-950 disabled:opacity-50">Approve Estimate</button>}
+        <button onClick={() => saveDraft()} disabled={saving || (tutorialMode && tutorialStep !== "save_or_approve")} className="min-h-12 rounded-lg bg-white font-semibold text-emerald-950 disabled:opacity-60">{saving ? "Saving…" : "Save as Draft"}</button>
+        {canManageFinancials && <button onClick={() => approve()} disabled={!calculation.valid || (tutorialMode && tutorialStep !== "save_or_approve")} className="min-h-12 rounded-lg bg-emerald-400 font-semibold text-emerald-950 disabled:opacity-50">Approve Estimate</button>}
       </div>
       {canManageFinancials && estimateId && <button type="button" onClick={deleteDraft} disabled={saving} className="mt-5 min-h-11 text-sm font-semibold text-red-300 underline-offset-4 hover:underline disabled:opacity-50">Delete Draft</button>}
       {status && <p role="status" className="mt-3 text-sm">{status}</p>}
     </section>
     </main>
-    <aside className="min-w-0 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
+    <aside data-tutorial-id="estimate-summary" className="min-w-0 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
       <EstimateSummary result={calculation.result} targetMargin={margin}/>
     </aside>
+    {tutorialMode && <EstimateTutorialCoach step={tutorialStep} canContinue={tutorialCanContinue} error={tutorialError} onFill={fillTutorialExample} onContinue={() => tutorialStepComplete(tutorialStep)} onExit={exitTutorial}/>}
+    {tutorialCompletionAction && <TutorialCompletionModal plan={tutorialPlan} action={tutorialCompletionAction} saving={saving} onKeep={() => finishTutorial(true)} onDiscard={() => finishTutorial(false)}/>}
+    {tutorialExitOpen && <TutorialExitModal saving={saving} onKeep={keepExitedTutorial} onDiscard={discardExitedTutorial} onCancel={() => setTutorialExitOpen(false)}/>}
   </div>;
 }

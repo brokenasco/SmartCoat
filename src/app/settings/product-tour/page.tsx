@@ -1,2 +1,2 @@
-import { ProductTour } from "@/components/product-tour";
-export default function ProductTourSettingsPage(){return <ProductTour settingsMode/>}
+import { redirect } from "next/navigation";
+export default function ProductTourSettingsPage(){redirect("/dashboard?tutorial=1")}

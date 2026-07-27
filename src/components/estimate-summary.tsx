@@ -15,6 +15,7 @@ export function EstimateSummary({ result, targetMargin }: {
       <p className="mt-5 text-xs uppercase tracking-wide text-emerald-100/70">Final Customer Estimate</p>
       <p aria-live="polite" className="mt-1 font-mono text-3xl font-semibold">{formatMoney(result.totals.customerEstimateCents)}</p>
       <dl className="mt-5 space-y-3 text-sm">
+        <SummaryRow label="Rooms Included" value={String(result.rooms.length)}/>
         <SummaryRow label="Paintable Area" value={`${result.totals.netPaintableAreaSqFt.toFixed(1)} ft²`}/>
         <SummaryRow label="Raw Paint Required" value={`${result.totals.rawGallonsRequired.toFixed(2)} gal`}/>
         <SummaryRow label="Purchased Paint" value={`${result.totals.gallonsPurchased.toFixed(2)} gal`}/>
